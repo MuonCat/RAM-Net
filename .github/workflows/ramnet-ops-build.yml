@@ -1,0 +1,190 @@
+name: ramnet-ops build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/ramnet-ops/**'
+      - '.github/workflows/ramnet-ops-build.yml'
+      - '.github/scripts/build_ops.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PIP_NO_CACHE_DIR: '1'
+  MAX_JOBS: '2'
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.profile.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Generate the Torch/CUDA build matrix
+        id: profile
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          combinations = {
+              '2.6.0': ('11.8', '12.6'),
+              '2.8.0': ('12.6', '12.8'),
+              '2.14.0': ('12.6', '13.0'),
+          }
+          # Toolchain settings only; operator sources are shared by every profile.
+          profiles = {
+              '11.8': ('7.5 8.0 8.6', '14.34.17.4'),
+              '12.6': ('8.0 8.6 8.9 9.0', '14.38.17.8'),
+              '12.8': ('8.9 9.0 10.0 12.0', '14.38.17.8'),
+              '13.0': ('8.9 9.0 10.0 12.0', '14.44.17.14'),
+          }
+          entries = []
+          for torch, cuda_versions in combinations.items():
+              stable_abi = torch == '2.14.0'
+              for cuda in cuda_versions:
+                  arch, msvc = profiles[cuda]
+                  entries.append({
+                      'torch': torch,
+                      'torch-label': f'Torch ABI 2.10+ / SDK {torch}' if stable_abi else f'Torch {torch}',
+                      'torch-tag': 'torchabi2_10' if stable_abi else f'torch{torch}',
+                      'cuda': cuda,
+                      'cuda-tag': 'cu' + cuda.replace('.', ''),
+                      'arch-list': arch,
+                      'msvc': '.'.join(msvc.split('.')[:2]),
+                      'msvc-component': f'Microsoft.VisualStudio.Component.VC.{msvc}.x86.x64',
+                      'stable-abi': int(stable_abi),
+                      # Retain one shared sdist across all platform/profile builds.
+                      'sdist': not entries,
+                  })
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'include': entries}) + '\n')
+          PY
+
+
+  windows:
+    needs: metadata
+    name: Windows / ${{ matrix.torch-label }} / CUDA ${{ matrix.cuda }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.matrix) }}
+    runs-on: windows-2022
+    timeout-minutes: 360
+    env:
+      TORCH_VERSION: ${{ matrix.torch }}
+      CUDA_VERSION: ${{ matrix.cuda }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch-list }}
+      MSVC_VERSION: ${{ matrix.msvc }}
+      MSVC_COMPONENT: ${{ matrix.msvc-component }}
+      DISTUTILS_USE_SDK: '1'
+      RAMNET_TORCH_STABLE_ABI: ${{ matrix.stable-abi }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - name: Prepare the VS 2022 x64 toolchain
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw 'VS 2022 C++ tools are required.' }
+          if (-not (Test-Path "$vsRoot\VC\Tools\MSVC\$env:MSVC_VERSION.*\bin\Hostx64\x64\cl.exe")) {
+              $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\setup.exe'
+              $arguments = @('modify', '--installPath', "`"$vsRoot`"", '--add', $env:MSVC_COMPONENT, '--quiet', '--norestart', '--nocache')
+              $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+              if ($process.ExitCode -notin 0, 3010) { throw "MSVC installation failed: $($process.ExitCode)" }
+          }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          "OPS_VCVARS=$vcvars" >> $env:GITHUB_ENV
+      - name: Install CUDA build components
+        id: cuda
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ matrix.cuda }}.0
+          method: network
+          sub-packages: ${{ matrix.cuda == '13.0' && '["nvcc", "cudart", "thrust", "crt", "nvvm"]' || '["nvcc", "cudart", "thrust"]' }}
+          use-github-cache: 'false'
+          log-file-suffix: ${{ matrix.torch-tag }}-${{ matrix.cuda-tag }}.txt
+      - name: Build the sdist and Windows wheel
+        id: build
+        shell: cmd
+        env:
+          CUDA_HOME: ${{ steps.cuda.outputs.CUDA_PATH }}
+        run: |
+          call "%OPS_VCVARS%" -vcvars_ver=%MSVC_VERSION%
+          if errorlevel 1 exit /b 1
+          python -m venv "%RUNNER_TEMP%\ops-build-env"
+          if errorlevel 1 exit /b 1
+          "%RUNNER_TEMP%\ops-build-env\Scripts\python.exe" .github\scripts\build_ops.py
+          exit /b %ERRORLEVEL%
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ramnet-ops-dist-windows-${{ matrix.torch-tag }}-${{ matrix.cuda-tag }}
+          path: ${{ steps.build.outputs.dist }}/*.whl
+          if-no-files-found: error
+      - name: Retain the shared source archive
+        if: matrix.sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: ramnet-ops-dist-source
+          path: ${{ steps.build.outputs.dist }}/*.tar.gz
+          if-no-files-found: error
+
+  linux:
+    needs: metadata
+    name: Linux / ${{ matrix.torch-label }} / CUDA ${{ matrix.cuda }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.matrix) }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      TORCH_VERSION: ${{ matrix.torch }}
+      CUDA_VERSION: ${{ matrix.cuda }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.arch-list }}
+      RAMNET_TORCH_STABLE_ABI: ${{ matrix.stable-abi }}
+      CC: /usr/bin/gcc-11
+      CXX: /usr/bin/g++-11
+      CUDAHOSTCXX: /usr/bin/g++-11
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+      - name: Install CUDA build components
+        id: cuda
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ matrix.cuda }}.0
+          method: network
+          sub-packages: '["nvcc", "cudart-dev", "cccl"]'
+          use-github-cache: 'false'
+          log-file-suffix: ${{ matrix.torch-tag }}-${{ matrix.cuda-tag }}.txt
+      - name: Build the sdist and Linux wheel
+        id: build
+        env:
+          CUDA_HOME: ${{ steps.cuda.outputs.CUDA_PATH }}
+        run: |
+          python -m venv "$RUNNER_TEMP/ops-build-env"
+          "$RUNNER_TEMP/ops-build-env/bin/python" .github/scripts/build_ops.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ramnet-ops-dist-linux-${{ matrix.torch-tag }}-${{ matrix.cuda-tag }}
+          path: ${{ steps.build.outputs.dist }}/*.whl
+          if-no-files-found: error

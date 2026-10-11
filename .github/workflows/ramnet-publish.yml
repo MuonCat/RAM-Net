@@ -1,0 +1,76 @@
+name: ramnet publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful build run ID
+        type: string
+        required: true
+      tag:
+        description: Existing version tag
+        type: string
+        required: true
+      target:
+        description: Publish to GitHub Release, optionally also TestPyPI / PyPI
+        type: choice
+        options: [release, testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ramnet-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.target }}
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install verification and upload tools
+        run: python -m pip install "twine>=6.2" wheel packaging
+      - name: Verify the build, tag, version, and artifact inventory
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python .github/scripts/verify_release.py source --package ramnet
+      - name: Download the verified build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id }}
+          artifact-ids: ${{ steps.source.outputs.artifact-ids }}
+          path: artifacts
+          merge-multiple: false
+          digest-mismatch: error
+      - name: Verify the wheel and source archive
+        run: |
+          python .github/scripts/verify_release.py artifacts
+          python -m twine check --strict dist/*
+      - name: Create or verify GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ steps.source.outputs.prerelease }}
+        run: python .github/scripts/publish_release.py
+      - name: Publish to TestPyPI / PyPI
+        if: inputs.target == 'testpypi' || inputs.target == 'pypi'
+        env:
+          TWINE_REPOSITORY: ${{ inputs.target }}
+        run: python -m twine upload --non-interactive dist/*

@@ -1,0 +1,51 @@
+# intermediate files
+build/
+dist/
+*.egg-info/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+
+# experimental results
+exp/
+results/
+wandb/
+*.ncu-proj
+*.ncu-rep
+
+# log files
+log.*
+*.log
+
+# pycache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# saved model
+*.pkl
+*.pt
+
+# local tooling and IDE
+.agents/
+.codex/
+.vscode/
+.idea/
+*CMakeLists.txt
+
+# macOS
+.DS_Store
+
+eval/
+*.o
+*.obj
+*.exp
+*.lib
+*.so
+*.dylib
+*.dll
+*.pyd
+*.cmd

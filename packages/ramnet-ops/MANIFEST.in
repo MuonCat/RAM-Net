@@ -1,0 +1,7 @@
+include LICENSE
+include README.md
+include RELEASING.md
+include csrc/*.cpp
+include csrc/*.cu
+include csrc/*.cuh
+include csrc/*.h
