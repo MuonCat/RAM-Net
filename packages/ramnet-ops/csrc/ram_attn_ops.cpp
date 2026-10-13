@@ -12,14 +12,15 @@ namespace ramnet_ops {
             const int64_t U, const int64_t P, const int64_t A,
             const int64_t T, const int64_t E,
             const int64_t K, const bool re_norm,
-            const bool addr_val_neg
+            const bool addr_val_neg = false,
+            const bool encode_batch_idx = true
         ) {
             return {
                 static_cast<int_t>(B), static_cast<int_t>(H),
                 static_cast<int_t>(U), static_cast<int_t>(P), static_cast<int_t>(A),
                 static_cast<int_t>(T), static_cast<int_t>(E),
                 static_cast<int_t>(K), re_norm,
-                addr_val_neg
+                addr_val_neg, encode_batch_idx
             };
         }
 
@@ -68,14 +69,15 @@ namespace ramnet_ops {
         const int64_t top_k,
         const bool top_k_re_norm,
 
-        const bool addr_val_neg
+        const bool addr_val_neg,
+        const bool encode_batch_idx
     ) {
         const auto cfg = address_config(
             addr.size(0), addr.size(1),
             addr.size(2), addr.size(3), A,
             addr.size(4), embed_num,
             top_k, top_k_re_norm,
-            addr_val_neg
+            addr_val_neg, encode_batch_idx
         );
 
         auto idx = torch_api::empty({cfg.B, cfg.H, cfg.top_k, cfg.T}, int_dtype, addr.device()); // w (B, H, K, T)
@@ -144,11 +146,12 @@ namespace ramnet_ops {
         const int64_t r_top_k,
 
         const bool w_re_norm,
-        const bool r_re_norm
+        const bool r_re_norm,
+        const bool encode_batch_idx
     ) {
         const auto B = w_addr.size(0), H = w_addr.size(1), U = w_addr.size(2), P = w_addr.size(3), T = w_addr.size(4);
-        const auto w_cfg = address_config(B, H, U, P, A, T, embed_num, w_top_k, w_re_norm, false);
-        const auto r_cfg = address_config(B, H, U, P, A, T, embed_num, r_top_k, r_re_norm, true);
+        const auto w_cfg = address_config(B, H, U, P, A, T, embed_num, w_top_k, w_re_norm, false, encode_batch_idx);
+        const auto r_cfg = address_config(B, H, U, P, A, T, embed_num, r_top_k, r_re_norm, true, encode_batch_idx);
 
         auto idx = torch_api::empty({B, H, w_top_k + r_top_k, T}, int_dtype, w_addr.device()); // (B, H, Kw + Kr, T)
         auto val = torch_api::empty({B, H, w_top_k + r_top_k, T}, acc_dtype, w_addr.device()); // (B, H, Kw + Kr, T)

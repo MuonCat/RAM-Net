@@ -7,7 +7,8 @@ def _addr_single_forward_fake(
         embed_num, A,
         position_ids,  # r (B, T)
         top_k, top_k_re_norm,
-        addr_val_neg,
+        addr_val_neg=False,
+        encode_batch_idx=True,
 ):  # idx, val [ (B, H, K, T), (B, H, K, T) ]
     B, H, _, _, T = addr.shape
     shape = (B, H, top_k, T)
@@ -39,7 +40,7 @@ def _addr_single_backward_fake(
 
 
 def _addr_single_setup(ctx, inputs, output):
-    addr, embed_num, A, position_ids, top_k, top_k_re_norm, addr_val_neg = inputs
+    addr, embed_num, A, position_ids, top_k, top_k_re_norm, addr_val_neg, _ = inputs
     idx, val = output
     B, H, U, P, T = addr.shape
 
@@ -78,7 +79,7 @@ def _addr_single_backward(
         ctx.top_k_re_norm, ctx.addr_val_neg,
         ctx.shape, ctx.dtype,
     )
-    return (D_addr,) + (None,) * 6
+    return (D_addr,) + (None,) * 7
 
 
 torch.library.register_autograd(
@@ -98,6 +99,7 @@ def _addr_forward_fake(
 
         w_top_k, r_top_k,
         w_re_norm, r_re_norm,
+        encode_batch_idx=True,
 ):  # idx, val [ (B, H, Kw + Kr, T), (B, H, Kw + Kr, T) ]
     B, H, _, _, T = w_addr.shape
     shape = (B, H, w_top_k + r_top_k, T)
@@ -128,7 +130,7 @@ def _addr_backward_fake(
 
 
 def _addr_setup(ctx, inputs, output):
-    w_addr, r_addr, embed_num, A, position_ids, w_top_k, r_top_k, w_re_norm, r_re_norm = inputs
+    w_addr, r_addr, embed_num, A, position_ids, w_top_k, r_top_k, w_re_norm, r_re_norm, _ = inputs
     idx, val = output
     B, H, U, P, T = w_addr.shape
 
@@ -167,7 +169,7 @@ def _addr_backward(
         ctx.shape, ctx.dtype,
     )
 
-    return (D_w if ctx.needs_input_grad[0] else None, D_r if ctx.needs_input_grad[1] else None) + (None,) * 7
+    return (D_w if ctx.needs_input_grad[0] else None, D_r if ctx.needs_input_grad[1] else None) + (None,) * 8
 
 
 torch.library.register_autograd(

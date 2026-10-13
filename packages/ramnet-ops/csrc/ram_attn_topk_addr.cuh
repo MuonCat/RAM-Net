@@ -8,17 +8,19 @@ struct TopKAddrConfig {
     bool top_k_re_norm;
 
     bool addr_val_neg;
+    bool encode_batch_idx;
 
     constexpr TopKAddrConfig(
         const int_t B_, const int_t H_,
         const int_t U_, const int_t P_, const int_t A_,
         const int_t T_, const int_t E_,
         const int_t top_k_, const bool top_k_re_norm_,
-        const bool addr_val_neg_
+        const bool addr_val_neg_,
+        const bool encode_batch_idx_
     )
         : B(B_), H(H_), U(U_), P(P_), A(A_), T(T_), E(E_),
           top_k(top_k_), top_k_re_norm(top_k_re_norm_),
-          addr_val_neg(addr_val_neg_) {
+          addr_val_neg(addr_val_neg_), encode_batch_idx(encode_batch_idx_) {
     }
 };
 

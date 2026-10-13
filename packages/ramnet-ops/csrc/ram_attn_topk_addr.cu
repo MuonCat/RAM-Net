@@ -103,15 +103,16 @@ __global__ void topk_addr_forward_kernel(
     if (cfg.top_k_re_norm)
         main.topk_log_softmax(cfg.top_k, thread_idx);
 
-    /* CAPE offset is time-based for the first E heads; batch-head id is folded into segment address. */
+    /* Apply CAPE to the first E heads and optionally encode the batch index. */
     int_t *const __restrict__ local_idx_ptr = top_k_addr_ptr.idx + top_k_addr_ptr.idx_stride.offset(b_idx, h_idx, 0, t_idx);
     acc_t *const __restrict__ local_val_ptr = top_k_addr_ptr.val + top_k_addr_ptr.val_stride.offset(b_idx, h_idx, 0, t_idx);
     const int_t a_offset = h_idx < cfg.E ? position_ids[b_idx * cfg.T + t_idx] % cfg.A : 0;
+    const int_t idx_offset = (cfg.encode_batch_idx ? bh_idx : h_idx) * cfg.A;
     const acc_t addr_val_sign = cfg.addr_val_neg ? -1 : +1;
 #pragma unroll
     for (int_t k = 0; k < max_k; ++k)
         if (k < cfg.top_k) {
-            local_idx_ptr[k * top_k_addr_ptr.idx_stride.k] = bh_idx * cfg.A + (main.get_idx(k, thread_idx) + cfg.A - a_offset) % cfg.A; // unique address index (bh_idx * cfg.a + a_idx)
+            local_idx_ptr[k * top_k_addr_ptr.idx_stride.k] = idx_offset + (main.get_idx(k, thread_idx) + cfg.A - a_offset) % cfg.A;
             local_val_ptr[k * top_k_addr_ptr.val_stride.k] = addr_val_sign * get_exp<acc_t>(main.get_val(k, thread_idx)); // Encode the positive weight with the requested sign.
         }
 }

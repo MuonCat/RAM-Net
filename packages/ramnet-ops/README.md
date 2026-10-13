@@ -280,6 +280,7 @@ Higher-order gradients are not supported.
 
 ## Development
 
+See [IMPLEMENTATION](IMPLEMENTATION.md) for CUDA operators, event numbering, and gradient conventions.
 See [RELEASING](RELEASING.md) for tests and publishing.
 
 MIT License. See [LICENSE](LICENSE).

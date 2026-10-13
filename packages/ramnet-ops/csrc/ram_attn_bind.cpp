@@ -30,7 +30,8 @@ RAMNET_LIBRARY(ramnet_ops, m) {
         "int embed_num, int A, "
         "Tensor position_ids, "
         "int top_k, bool top_k_re_norm, "
-        "bool addr_val_neg"
+        "bool addr_val_neg=False, "
+        "bool encode_batch_idx=True"
         ") -> (Tensor, Tensor)");
     m.def(
         "topk_addr_single_backward("
@@ -48,7 +49,8 @@ RAMNET_LIBRARY(ramnet_ops, m) {
         "int embed_num, int A, "
         "Tensor position_ids, "
         "int w_top_k, int r_top_k, "
-        "bool w_re_norm, bool r_re_norm"
+        "bool w_re_norm, bool r_re_norm, "
+        "bool encode_batch_idx=True"
         ") -> (Tensor, Tensor)");
     m.def(
         "topk_addr_backward("

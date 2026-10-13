@@ -1,5 +1,6 @@
 """Dispatcher schemas, fake tensors, and segment capacity contracts."""
 
+from itertools import product
 import unittest
 
 import torch
@@ -23,7 +24,14 @@ class CudaRegistrationTest(unittest.TestCase):
                 w = case.w_addr.requires_grad_()
                 r = case.r_addr.requires_grad_()
                 pos = case.position_ids.to(self.int_dtype)
-                for addr, k, re_norm, neg in ((w, 2, False, False), (r, 3, True, True)):
+                torch.library.opcheck(
+                    torch.ops.ramnet_ops.topk_addr_single_forward,
+                    (w, 1, 4 ** order, pos, 2, False),
+                    test_utils=checks,
+                )
+                for (addr, k, re_norm, neg), encode_batch_idx in product(
+                        ((w, 2, False, False), (r, 3, True, True)), (False, True),
+                ):
                     torch.library.opcheck(
                         torch.ops.ramnet_ops.topk_addr_single_forward,
                         (
@@ -32,6 +40,7 @@ class CudaRegistrationTest(unittest.TestCase):
                             k,
                             re_norm, neg,
                         ),
+                        kwargs={"encode_batch_idx": encode_batch_idx},
                         test_utils=checks,
                     )
                 args = (
@@ -40,7 +49,11 @@ class CudaRegistrationTest(unittest.TestCase):
                     2, 3,
                     False, True,
                 )
-                torch.library.opcheck(torch.ops.ramnet_ops.topk_addr_forward, args, test_utils=checks)
+                for encode_batch_idx in (False, True):
+                    torch.library.opcheck(
+                        torch.ops.ramnet_ops.topk_addr_forward, args,
+                        kwargs={"encode_batch_idx": encode_batch_idx}, test_utils=checks,
+                    )
                 idx, val = torch.ops.ramnet_ops.topk_addr_forward(*args)
                 meta = gather_segment(idx, None, 4 ** order)
                 args = (

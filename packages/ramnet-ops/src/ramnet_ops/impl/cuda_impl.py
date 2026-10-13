@@ -286,8 +286,14 @@ def cuda_topk_addr(
         top_k_re_norm: bool,
 
         addr_val_neg: bool = False,
+        encode_batch_idx: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:  # shapes: int32 (B, H, K, T), float32 (B, H, K, T)
-    """Decode one CUDA address tensor; gradients propagate through the values."""
+    """Decode one CUDA address tensor; gradients propagate through the values.
+
+    Indices encode ``(b * H + h) * A + a_idx`` by default.
+    Set ``encode_batch_idx=False`` to return ``h * A + a_idx`` in ``[0, H * A)``.
+    CAPE offsets still apply in either mode.
+    """
     assert addr.ndim == 5, f"Expected address shape (B, H, U, P, T), got {tuple(addr.shape)}."
     assert addr.is_cuda, f"Expected CUDA addresses, got {addr.device}."
 
@@ -298,6 +304,7 @@ def cuda_topk_addr(
     assert isinstance(embed_num, int) and 0 <= embed_num <= H, f"Expected embed_num in [0, {H}], got {embed_num!r}."
     assert isinstance(top_k_re_norm, bool), f"Expected boolean top_k_re_norm, got {top_k_re_norm!r}."
     assert isinstance(addr_val_neg, bool), f"Expected boolean addr_val_neg, got {addr_val_neg!r}."
+    assert isinstance(encode_batch_idx, bool), f"Expected boolean encode_batch_idx, got {encode_batch_idx!r}."
     assert position_ids.shape == (B, T), f"Expected position_ids.shape={(B, T)}, got {tuple(position_ids.shape)}."
     padded_T = T + (32 - T % 32) % 32
     check_int_capacity(B, H, U, P, A, padded_T, embed_num, top_k,
@@ -314,7 +321,7 @@ def cuda_topk_addr(
         addr,
         embed_num, A, position_ids,
         top_k, top_k_re_norm,
-        addr_val_neg,
+        addr_val_neg, encode_batch_idx,
     )
 
     if addr_idx.size(-1) > T:

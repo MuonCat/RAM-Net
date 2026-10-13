@@ -1,5 +1,6 @@
 """Fixed-shape AOT/Inductor compilation and real CUDA Graph replay."""
 
+from itertools import product
 import unittest
 
 import torch
@@ -17,10 +18,10 @@ class CudaCompileTest(unittest.TestCase):
         from ramnet_ops.impl.cuda_impl import cuda_topk_addr
 
         for backend in COMPILE_BACKENDS:
-            for re_norm in (False, True):
-                with self.subTest(backend=backend, re_norm=re_norm):
+            for re_norm, encode_batch_idx in product((False, True), repeat=2):
+                with self.subTest(backend=backend, re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                     def forward(addr, position_ids):
-                        return cuda_topk_addr(addr, 1, position_ids, 3, re_norm, True)
+                        return cuda_topk_addr(addr, 1, position_ids, 3, re_norm, True, encode_batch_idx=encode_batch_idx)
 
                     with compile_case(forward, backend) as (compiled, counter):
                         for batch_index, seq_len in enumerate((32, 33, 33)):

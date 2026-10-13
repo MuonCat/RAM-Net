@@ -22,15 +22,18 @@ class AddressNumericsTest(unittest.TestCase):
 
     def test_fp32_matches_torch(self):
         case = make_cuda_case(seq_len=31)
-        for re_norm, neg in product((False, True), repeat=2):
-            with self.subTest(re_norm=re_norm, neg=neg):
+        for re_norm, neg, encode_batch_idx in product((False, True), repeat=3):
+            with self.subTest(re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 source = case.r_addr if neg else case.w_addr
                 addr = source.detach().requires_grad_()
-                idx, val = self.addr(addr, 1, case.position_ids, 3, re_norm, neg)
+                idx, val = self.addr(addr, 1, case.position_ids, 3, re_norm, neg, encode_batch_idx=encode_batch_idx)
+                B, H = addr.shape[:2]
+                index_batches = B if encode_batch_idx else 1
+                idx = idx - torch.arange(index_batches * H, device=idx.device, dtype=idx.dtype).reshape(index_batches, H, 1, 1) * 16
                 log_addr = addr.log_softmax(dim=-2).permute(4, 0, 1, 2, 3)
                 dense = addr_decode(log_addr, case.position_ids, 1).permute(1, 2, 3, 0)
                 # Check membership independently, then compare weights in native index order.
-                selected = dense.gather(-2, (idx % 16).long())
+                selected = dense.gather(-2, idx.long())
                 torch.testing.assert_close(
                     selected.sort(dim=-2).values,
                     dense.topk(3, dim=-2).values.sort(dim=-2).values,
@@ -51,13 +54,13 @@ class AddressNumericsTest(unittest.TestCase):
     def test_low_precision_matches_cuda_fp32(self):
         dtypes = low_precision_dtypes(required=True)
         case = make_cuda_case(seq_len=31)
-        for dtype, re_norm, neg in product(dtypes, (False, True), (False, True)):
-            with self.subTest(dtype=dtype, re_norm=re_norm, neg=neg):
+        for dtype, re_norm, neg, encode_batch_idx in product(dtypes, (False, True), (False, True), (False, True)):
+            with self.subTest(dtype=dtype, re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 source = case.r_addr if neg else case.w_addr
                 low = source.to(dtype).detach().requires_grad_()
                 fp32 = low.detach().float().requires_grad_()
-                idx, val = self.addr(low, 1, case.position_ids, 3, re_norm, neg)
-                ref_idx, ref_val = self.addr(fp32, 1, case.position_ids, 3, re_norm, neg)
+                idx, val = self.addr(low, 1, case.position_ids, 3, re_norm, neg, encode_batch_idx=encode_batch_idx)
+                ref_idx, ref_val = self.addr(fp32, 1, case.position_ids, 3, re_norm, neg, encode_batch_idx=encode_batch_idx)
                 # Sorting removes arbitrary ordering among equal Top-K weights.
                 idx, order = idx.sort(dim=-2)
                 ref_idx, ref_order = ref_idx.sort(dim=-2)

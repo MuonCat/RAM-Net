@@ -18,8 +18,8 @@ class CudaAddressTest(unittest.TestCase):
         self.int_dtype = torch.int32
 
     def test_address_gradient_convention(self):
-        for re_norm in (False, True):
-            with self.subTest(re_norm=re_norm):
+        for re_norm, encode_batch_idx in product((False, True), repeat=2):
+            with self.subTest(re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                 case = make_cuda_case()
                 w, r = (t.detach().requires_grad_() for t in (case.w_addr, case.r_addr))
                 idx, val = torch.ops.ramnet_ops.topk_addr_forward(
@@ -27,12 +27,16 @@ class CudaAddressTest(unittest.TestCase):
                     1, 16, case.position_ids.to(self.int_dtype),
                     2, 3,
                     re_norm, re_norm,
+                    encode_batch_idx=encode_batch_idx,
                 )
+                B, H = w.shape[:2]
+                index_batches = B if encode_batch_idx else 1
+                idx = idx - torch.arange(index_batches * H, device=idx.device, dtype=idx.dtype).reshape(index_batches, H, 1, 1) * 16
                 refs = []
                 for addr, indices, k, sign in ((w, idx[:, :, :2], 2, 1), (r, idx[:, :, 2:], 3, -1)):
                     log_addr = addr.log_softmax(dim=-2).permute(4, 0, 1, 2, 3)
                     dense = addr_decode(log_addr, case.position_ids, 1, k, re_norm).permute(1, 2, 3, 0)
-                    refs.append(sign * dense.gather(-2, (indices % 16).long()))
+                    refs.append(sign * dense.gather(-2, indices.long()))
                 ref = torch.cat(refs, dim=-2)
                 # The private addr/segment chain passes gradients of positive read weights.
                 w_ref, r_ref = refs
@@ -56,16 +60,48 @@ class CudaAddressTest(unittest.TestCase):
                 addr = source.to(dtype).detach().requires_grad_()
                 original = addr.detach().clone()
                 idx, val = cuda_topk_addr(addr, 1, case.position_ids, 3, re_norm, neg)
+                batch_local_idx, batch_local_val = cuda_topk_addr(
+                    addr, 1, case.position_ids, 3, re_norm, neg, encode_batch_idx=False,
+                )
+                B, H, U, P, _ = addr.shape
+                batch_offset = torch.arange(B, device=idx.device, dtype=idx.dtype).view(B, 1, 1, 1) * H * P ** U
+                torch.testing.assert_close(idx, batch_local_idx + batch_offset, atol=0, rtol=0)
+                torch.testing.assert_close(val, batch_local_val, atol=0, rtol=0)
                 self.assertEqual(idx.shape, (2, 2, 3, 31))
                 self.assertEqual(idx.dtype, self.int_dtype)
                 self.assertEqual(val.dtype, torch.float32)
                 self.assertFalse(idx.requires_grad)
                 grad = torch.randn_like(val)
                 actual, = torch.autograd.grad(val, addr, grad)
+                batch_local_grad, = torch.autograd.grad(batch_local_val, addr, grad)
+                torch.testing.assert_close(actual, batch_local_grad, atol=0, rtol=0)
                 self.assertTrue(torch.isfinite(val).all())
                 self.assertTrue(torch.isfinite(actual).all())
                 self.assertEqual(actual.dtype, dtype)
                 torch.testing.assert_close(addr, original, atol=0, rtol=0)
+
+    def test_single_address_backward_contract(self):
+        case = make_cuda_case()
+        pos = case.position_ids.to(self.int_dtype)
+        for re_norm, encode_batch_idx in product((False, True), repeat=2):
+            with self.subTest(re_norm=re_norm, encode_batch_idx=encode_batch_idx):
+                addr = case.w_addr.detach().requires_grad_()
+                B, H, U, P, T = addr.shape
+                idx, val = torch.ops.ramnet_ops.topk_addr_single_forward(
+                    addr, 1, P ** U, pos, 3, re_norm, encode_batch_idx=encode_batch_idx,
+                )
+                grad = torch.randn_like(val)
+                expected, = torch.autograd.grad(val, addr, grad)
+                args = (
+                    idx, val.detach(), None if re_norm else addr.detach(), grad,
+                    1, pos, 3, re_norm, False, (B, H, U, P, P ** U, T), addr.dtype,
+                )
+                actual = torch.ops.ramnet_ops.topk_addr_single_backward(*args)
+                torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+                torch.library.opcheck(
+                    torch.ops.ramnet_ops.topk_addr_single_backward, args,
+                    test_utils=("test_schema", "test_faketensor"),
+                )
 
     def test_address_and_padded_index_limits(self):
         from torch._subclasses.fake_tensor import FakeTensorMode

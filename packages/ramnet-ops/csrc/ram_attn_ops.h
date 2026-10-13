@@ -20,7 +20,8 @@ namespace ramnet_ops {
         int64_t top_k,
         bool top_k_re_norm,
 
-        bool addr_val_neg
+        bool addr_val_neg,
+        bool encode_batch_idx
     ); // w: idx/val (B, H, K, T)
 
     Tensor topk_addr_single_backward(
@@ -56,7 +57,8 @@ namespace ramnet_ops {
         int64_t r_top_k,
 
         bool w_re_norm,
-        bool r_re_norm
+        bool r_re_norm,
+        bool encode_batch_idx
     ); // w: idx/val (B, H, Kw + Kr, T)
 
     TensorPair topk_addr_backward(
