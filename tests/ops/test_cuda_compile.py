@@ -15,13 +15,13 @@ class CudaCompileTest(unittest.TestCase):
         self.ram = require_cuda_ops()
 
     def test_compile_single_address_forward_and_backward(self):
-        from ramnet_ops.impl.cuda_impl import cuda_topk_addr
+        from ramnet_ops.impl.cuda_impl import _cuda_topk_addr
 
         for backend in COMPILE_BACKENDS:
             for re_norm, encode_batch_idx in product((False, True), repeat=2):
                 with self.subTest(backend=backend, re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                     def forward(addr, position_ids):
-                        return cuda_topk_addr(addr, 1, position_ids, 3, re_norm, True, encode_batch_idx=encode_batch_idx)
+                        return _cuda_topk_addr(addr, 1, position_ids, 3, re_norm, True, encode_batch_idx=encode_batch_idx)
 
                     with compile_case(forward, backend) as (compiled, counter):
                         for batch_index, seq_len in enumerate((32, 33, 33)):

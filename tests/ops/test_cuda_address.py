@@ -49,7 +49,7 @@ class CudaAddressTest(unittest.TestCase):
                     torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
 
     def test_single_address_wrapper_contract(self):
-        from ramnet_ops.impl.cuda_impl import cuda_topk_addr
+        from ramnet_ops.impl.cuda_impl import _cuda_topk_addr
 
         case = make_cuda_case(seq_len=31)
         for dtype, re_norm, neg in product(
@@ -59,8 +59,8 @@ class CudaAddressTest(unittest.TestCase):
                 source = case.r_addr if neg else case.w_addr
                 addr = source.to(dtype).detach().requires_grad_()
                 original = addr.detach().clone()
-                idx, val = cuda_topk_addr(addr, 1, case.position_ids, 3, re_norm, neg)
-                batch_local_idx, batch_local_val = cuda_topk_addr(
+                idx, val = _cuda_topk_addr(addr, 1, case.position_ids, 3, re_norm, neg)
+                batch_local_idx, batch_local_val = _cuda_topk_addr(
                     addr, 1, case.position_ids, 3, re_norm, neg, encode_batch_idx=False,
                 )
                 B, H, U, P, _ = addr.shape
@@ -106,14 +106,14 @@ class CudaAddressTest(unittest.TestCase):
     def test_address_and_padded_index_limits(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from ramnet_ops.impl._cuda_config import INT_BITS, INT_MAX
-        from ramnet_ops.impl.cuda_impl import cuda_topk_addr
+        from ramnet_ops.impl.cuda_impl import _cuda_topk_addr
 
         # Reject invalid metadata before allocating outputs or launching native kernels.
         with FakeTensorMode():
             addr = torch.empty(1, 1, INT_BITS - 2, 2, 32, device="cuda", dtype=torch.float32)
             pos = torch.empty(1, 32, device="cuda", dtype=self.int_dtype)
             with self.assertRaisesRegex(AssertionError, "Address space overflow"):
-                cuda_topk_addr(addr, 0, pos, 1, True)
+                _cuda_topk_addr(addr, 0, pos, 1, True)
 
             if INT_BITS == 32:
                 # The original T fits; its next multiple of 32 exceeds the index limit.
@@ -121,4 +121,4 @@ class CudaAddressTest(unittest.TestCase):
                 addr = torch.empty(1, 1, 1, 1, T, device="cuda", dtype=torch.float32)
                 pos = torch.empty(1, T, device="cuda", dtype=self.int_dtype)
                 with self.assertRaisesRegex(AssertionError, "CUDA index overflow"):
-                    cuda_topk_addr(addr, 0, pos, 1, True)
+                    _cuda_topk_addr(addr, 0, pos, 1, True)

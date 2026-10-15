@@ -98,3 +98,39 @@ class RamAttentionApiTest(unittest.TestCase):
                         impl_backend='torch',
                     )
             impl.assert_not_called()
+
+
+class TopKAddressApiTest(unittest.TestCase):
+    requires_cuda = False
+
+    def test_cpu_default_and_package_export(self):
+        from ramnet_ops import topk_addr
+
+        self.assertIs(topk_addr, ram_attn_module.topk_addr)
+        addr = torch.randn(2, 2, 2, 3, 5)
+        positions = torch.arange(5).expand(2, -1)
+        expected = topk_addr(addr, 1, positions, 4, False, impl_backend='torch')
+        with patch.object(ram_attn_module, '_cuda_topk_addr') as cuda:
+            actual = topk_addr(addr, 1, positions, 4, False)
+            cuda.assert_not_called()
+        for actual_tensor, expected_tensor in zip(actual, expected):
+            torch.testing.assert_close(actual_tensor, expected_tensor, atol=0, rtol=0)
+
+    def test_explicit_backend_forwards_options(self):
+        addr = torch.zeros(2, 2, 2, 3, 5)
+        positions = torch.arange(5).expand(2, -1)
+        args = (addr, 1, positions, 4, True, True, False)
+        for backend in ('torch', 'cuda'):
+            with self.subTest(backend=backend):
+                with patch.object(ram_attn_module, f'_{backend}_topk_addr', return_value=(None, None)) as impl:
+                    ram_attn_module.topk_addr(*args, impl_backend=backend)
+                    impl.assert_called_once_with(*args)
+
+    def test_invalid_or_unavailable_backend(self):
+        addr = torch.zeros(1, 1, 1, 2, 1)
+        positions = torch.zeros(1, 1, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, 'impl_backend'):
+            ram_attn_module.topk_addr(addr, 0, positions, 1, False, impl_backend='invalid')
+        with patch.object(ram_attn_module, '_cuda_topk_addr', None):
+            with self.assertRaisesRegex(RuntimeError, 'CUDA address decoder is unavailable'):
+                ram_attn_module.topk_addr(addr, 0, positions, 1, False, impl_backend='cuda')

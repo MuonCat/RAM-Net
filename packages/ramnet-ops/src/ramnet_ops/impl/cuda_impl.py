@@ -276,7 +276,7 @@ def _cuda_ram_attn(
     return ys, post_slot, post_mass
 
 
-def cuda_topk_addr(
+def _cuda_topk_addr(
         addr: torch.Tensor,  # (B, H, U, P, T)
 
         embed_num: int,

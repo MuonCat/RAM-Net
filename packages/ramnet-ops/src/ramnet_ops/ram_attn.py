@@ -2,17 +2,18 @@ import torch
 import warnings
 from typing import Callable, Literal
 
-from .impl.torch_impl import _torch_ram_attn
+from .impl.torch_impl import _torch_ram_attn, _torch_topk_addr
 
 _triton_ram_attn = None
 _cuda_load_error = None
 
 try:
-    from .impl.cuda_impl import _cuda_ram_attn
+    from .impl.cuda_impl import _cuda_ram_attn, _cuda_topk_addr
 except Exception as e:
     _cuda_load_error = e
     warnings.warn(f"Failed to load the CUDA implementation: {e}. Install a compatible ramnet-ops CUDA wheel or build it with pip.")
     _cuda_ram_attn = None
+    _cuda_topk_addr = None
 
 ImplCallableType = Callable[
     [
@@ -40,6 +41,61 @@ def get_broadcast(*vals: int) -> int:
     res = {v for v in vals if v != 1}
     assert len(res) <= 1, f"Cannot broadcast {vals}"
     return next(iter(res), 1)
+
+
+def topk_addr(
+        addr: torch.Tensor,
+
+        embed_num: int,
+        position_ids: torch.Tensor,
+
+        top_k: int,
+        top_k_re_norm: bool,
+
+        addr_val_neg: bool = False,
+        encode_batch_idx: bool = True,
+        impl_backend: Literal['torch', 'cuda'] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Top-K address decoding.
+
+    Shape symbols:
+        B: batch size
+        T: number of tokens (sequence length)
+        H: number of heads
+        U: order of address space (number of address digits)
+        P: address radix (paper d_p), giving A = P ** U memory slots
+        K: number of selected addresses (top_k)
+
+    :param addr: Address logits in (B, H, U, P, T).
+    :param embed_num: Number of heads using CAPE-style shift embedding (applied from head 0); must be in ``[0, H]``.
+    :param position_ids: Token positions for cyclic address positional embedding, shape (B, T).
+    :param top_k: Number of addresses to retain; must be in ``[1, P ** U]``.
+    :param top_k_re_norm: Whether to re-normalize selected weights to sum to 1.0 before applying addr_val_neg.
+    :param addr_val_neg: Whether to negate the returned weights.
+    :param encode_batch_idx: Whether indices encode ``(b * H + h) * A + a_idx``; False returns ``h * A + a_idx``. CAPE applies in both modes.
+    :param impl_backend: Backend implementation: 'torch' or 'cuda'. Use None for auto-selection.
+    :return: ``(idx, val)`` with both tensors in shape ``(B, H, K, T)``. Indices are int32; weights are FP32, or FP64 for FP64 input on the Torch backend.
+    """
+    assert isinstance(addr, torch.Tensor), f"Expected addr to be Tensor, got {type(addr).__name__}."
+
+    if impl_backend not in (None, 'torch', 'cuda'):
+        raise ValueError(f"Unsupported impl_backend: {impl_backend!r}.")
+
+    if impl_backend is None:
+        impl_backend = 'torch'
+        if addr.is_cuda:
+            if _cuda_topk_addr is not None and addr.dtype in (torch.float16, torch.bfloat16, torch.float32):
+                impl_backend = 'cuda'
+            else:
+                warnings.warn("CUDA address decoder is unavailable for this input; falling back to Torch, which materializes all P ** U address scores.")
+
+    if impl_backend == 'cuda' and _cuda_topk_addr is None:
+        raise RuntimeError("CUDA address decoder is unavailable.") from _cuda_load_error
+
+    impl_func = _cuda_topk_addr if impl_backend == 'cuda' else _torch_topk_addr
+
+    return impl_func(addr, embed_num, position_ids, top_k, top_k_re_norm, addr_val_neg, encode_batch_idx)
 
 
 def random_access_memory_attention(

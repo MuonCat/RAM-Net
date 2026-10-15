@@ -149,6 +149,69 @@ def addr_decode(addr: torch.Tensor, position_ids: torch.Tensor, embed_num: int =
     return addr.exp()
 
 
+def _torch_topk_addr(
+        addr: torch.Tensor,  # (B, H, U, P, T)
+
+        embed_num: int,
+        position_ids: torch.Tensor,  # (B, T)
+
+        top_k: int,
+        top_k_re_norm: bool,
+
+        addr_val_neg: bool = False,
+        encode_batch_idx: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:  # shapes: (B, H, K, T), (B, H, K, T)
+    """
+    Top-K address decoding with the Torch reference implementation.
+
+    Shape symbols:
+        B: batch size
+        T: number of tokens (sequence length)
+        H: number of heads
+        U: order of address space (number of address digits)
+        P: address radix (paper d_p), giving A = P ** U memory slots
+        K: number of selected addresses (top_k)
+
+    :param addr: Address logits in (B, H, U, P, T).
+    :param embed_num: Number of heads using CAPE-style shift embedding (applied from head 0); must be in ``[0, H]``.
+    :param position_ids: Token positions for cyclic address positional embedding, shape (B, T).
+    :param top_k: Number of addresses to retain; must be in ``[1, P ** U]``.
+    :param top_k_re_norm: Whether to re-normalize selected weights to sum to 1.0 before applying addr_val_neg.
+    :param addr_val_neg: Whether to negate the returned weights.
+    :param encode_batch_idx: Whether indices encode ``(b * H + h) * A + a_idx``; False returns ``h * A + a_idx``. CAPE applies in both modes.
+    :return: ``(idx, val)`` with both tensors in shape ``(B, H, K, T)``. Indices are int32; weights are FP32, or FP64 for FP64 input.
+
+    This reference materializes all P ** U address scores before Top-K selection.
+    Gradients propagate through val. All-negative-infinity address digits produce zero weights.
+    """
+    assert addr.ndim == 5, "Expected address shape (B, H, U, P, T)."
+    B, H, U, P, T = addr.shape
+    A = P ** U
+    index_batches = B if encode_batch_idx else 1
+    acc_type = torch.float64 if addr.dtype == torch.float64 else torch.float32
+
+    assert 0 < top_k <= A, f"Expected top_k in [1, A={A}], got {top_k!r}."
+    assert position_ids.shape == (B, T), f"Expected position_ids.shape={(B, T)}."
+
+    logits = addr.to(acc_type)
+
+    # Treat all-negative-infinity digits as zero-weight events to avoid NaN gradients.
+    inactive = torch.isneginf(logits).all(dim=-2).any(dim=-2)  # (B, H, T)
+    logits = logits.masked_fill(inactive[:, :, None, None, :], 0)
+
+    # Decode the complete distribution, including CAPE, before selecting Top-K.
+    weights = addr_decode(einops.rearrange(logits, 'b h u p t -> t b h u p').log_softmax(dim=-1), position_ids, embed_num)  # (T, B, H, A)
+    weights = einops.rearrange(weights, 't b h a -> b h a t')
+    val, idx = torch.topk(weights, top_k, dim=-2)  # (B, H, K, T)
+    if top_k_re_norm:
+        val = val / val.sum(dim=-2, keepdim=True)
+    val = val.masked_fill(inactive.unsqueeze(-2), 0)
+
+    slot_offset = torch.arange(index_batches * H, device=addr.device).view(index_batches, H, 1, 1) * A
+    idx = (idx + slot_offset).to(torch.int32)
+    return idx, -val if addr_val_neg else val
+
+
 def _torch_ram_attn(
         w_addr: torch.Tensor,  # (B, H, U, P, T)
         r_addr: torch.Tensor,  # (B, H, U, P, T)

@@ -256,6 +256,28 @@ This example demonstrates the API; it is not an experiment configuration.
 - `t_dim`: index of the time axis. Dimensions before `H` other than the time axis are broadcast as batch dimensions.
 - `impl_backend`: `'cuda'` or `'torch'`. By default, CUDA inputs use the CUDA backend when supported and otherwise fall back to PyTorch with a warning.
 
+### Standalone address decoding
+
+`topk_addr` decodes one address tensor without reading or updating RAM state:
+
+```python
+from ramnet_ops import topk_addr
+
+# addr: (B, H, U, P, T); position_ids: (B, T)
+idx, val = topk_addr(
+    addr, embed_num=0, position_ids=position_ids,
+    top_k=8, top_k_re_norm=False,
+    addr_val_neg=False, encode_batch_idx=True,
+    impl_backend=None,
+)
+```
+
+Both outputs have shape `(B, H, top_k, T)`. Indices are int32; weights are FP32. Gradients propagate through `val`.
+`encode_batch_idx=True` returns `(b * H + h) * A + a_idx`; `False` returns `h * A + a_idx`. CAPE applies to the first `embed_num` heads in both modes.
+`top_k_re_norm=True` renormalizes the selected weights; `addr_val_neg=True` negates them.
+Set `impl_backend` explicitly to `'torch'` or `'cuda'`, or leave it as `None` for automatic selection.
+The Torch reference expands all `A = P ** U` scores before selection. Tied scores may select different indices across backends.
+
 ## CUDA execution
 
 The CUDA backend automatically selects between **autoregressive** and **parallel** execution.
