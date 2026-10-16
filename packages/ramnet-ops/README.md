@@ -70,7 +70,7 @@ If your environment meets **all** of the following requirements, install directl
 - **Platform:** Windows x64 or Linux x86_64 with glibc ≥ 2.35.
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet-ops
+python -m pip install ramnet-ops
 ```
 
 Prebuilt wheels need no local compiler or CUDA Toolkit.
@@ -165,7 +165,7 @@ Then choose one of the following sources.
 **Download and build with pip** — install the published source archive from TestPyPI / PyPI:
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet-ops --no-binary=ramnet-ops --no-build-isolation
+python -m pip install ramnet-ops --no-binary=ramnet-ops --no-build-isolation
 ```
 
 **Clone from GitHub and build locally** — use the repository source, for example when modifying the operators:

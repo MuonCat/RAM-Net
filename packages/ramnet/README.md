@@ -70,7 +70,7 @@ Select a CUDA build matching your PyTorch version, GPU, and platform using the [
 For environments matching the [default stable ABI wheel requirements](../ramnet-ops/README.md#2-install-ramnet-ops), install directly from TestPyPI / PyPI:
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet-ops
+python -m pip install ramnet-ops
 ```
 
 ### 3. Install ramnet
@@ -79,7 +79,7 @@ The model package is pure Python and needs no compiler.
 Install it from TestPyPI / PyPI:
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet
+python -m pip install ramnet
 ```
 
 #### From source
@@ -89,7 +89,7 @@ With the dependencies above installed, choose one source.
 **Download with pip** — install the published source archive from TestPyPI / PyPI:
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet --no-binary=ramnet
+python -m pip install ramnet --no-binary=ramnet
 ```
 
 **Clone from GitHub and install locally**:

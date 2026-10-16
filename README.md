@@ -148,7 +148,7 @@ If your environment meets **all** of the following requirements, install directl
 - **Platform:** Windows x64 or Linux x86_64 with glibc ≥ 2.35.
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet-ops
+python -m pip install ramnet-ops
 ```
 
 If your environment **does not meet all of the requirements above**, see [Other Torch/CUDA builds (GitHub Releases)](packages/ramnet-ops/README.md#other-torchcuda-builds-github-releases) for alternative builds and their supported configurations.
@@ -160,7 +160,7 @@ For source builds, see the [ramnet-ops installation guide](packages/ramnet-ops/R
 Install the attention layers and Hugging Face models:
 
 ```bash
-python -m pip install -i https://test.pypi.org/simple/ ramnet
+python -m pip install ramnet
 ```
 
 See the [ramnet README](packages/ramnet/README.md#installation) for source installation and usage examples.

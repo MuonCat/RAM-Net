@@ -34,7 +34,7 @@ class RAMNetAttention(torch.nn.Module):
 
     :param embed_num: Number of heads applying Cyclic Address Positional Embedding (CAPE). 0 disables CAPE; explicit values must be in ``[0, n_heads]``.
 
-    :param addr_temperature: Temperature for address localization; smaller values precise memory access.
+    :param addr_temperature: Temperature for address localization; smaller values sharpen memory access. None defaults to sqrt(addr_order).
     :param top_k: Limits sparsity of the address vector. A two-item tuple/list applies separately to (write_k, read_k); int applies to both. Active state per token is proportional to k * d_v.
     :param top_k_re_norm: Whether to re-normalize the address vector after top-k filtering, forcing the top-k entries to sum to 1.0.
         A bool applies to both write and read; a two-item tuple/list specifies separate (write, read) bools.
@@ -68,7 +68,7 @@ class RAMNetAttention(torch.nn.Module):
             # === Positional Encoding (CAPE) ===
             embed_num: int = 0,
             # === Address Decoder ===
-            addr_temperature: float = 2.2,
+            addr_temperature: float | None = None,
             top_k: tuple[int, int] | list[int] | int | None = 8,
             top_k_re_norm: bool | tuple[bool, bool] | list[bool] = False,
             # === Readout ===
@@ -90,6 +90,7 @@ class RAMNetAttention(torch.nn.Module):
         if output_gate is not None and output_gate not in Activation_mapping:
             raise ValueError(f"Unsupported output_gate: {output_gate!r}.")
         assert hidden_size > 0 and n_heads > 0 and addr_order > 0 and addr_radix > 0, f"Expected positive dimensions, got {hidden_size=}, {n_heads=}, {addr_order=}, {addr_radix=}."
+        addr_temperature = addr_order ** 0.5 if addr_temperature is None else addr_temperature
         assert addr_temperature > 0, f"Expected addr_temperature > 0, got {addr_temperature}."
         assert isinstance(embed_num, int) and 0 <= embed_num <= n_heads, f"Expected embed_num in [0, {n_heads}], got {embed_num!r}."
         assert ram_attn_eps > 0, f"Expected ram_attn_eps > 0, got {ram_attn_eps}."
@@ -291,13 +292,12 @@ class RAMNetAttention(torch.nn.Module):
             raise ValueError('t_dim must index a non-channel axis of hidden_states.')
         if hidden_states.size(t_dim) == 0:
             raise ValueError('The sequence must contain at least one token.')
-        match init_ram:
-            case None:
-                init_slot, init_mass = None, self.init_mass
-            case (init_slot, init_mass):
-                pass
-            case _:
-                raise TypeError('init_ram must be None or a (slot, mass) pair.')
+        if init_ram is None:
+            init_slot, init_mass = None, self.init_mass
+        elif isinstance(init_ram, (tuple, list)) and len(init_ram) == 2:
+            init_slot, init_mass = init_ram
+        else:
+            raise TypeError('init_ram must be None or a (slot, mass) pair.')
 
         # project address and value
         r_addr = einops.rearrange(self.r_proj(hidden_states), '... (h u p) -> ... h u p', h=self.n_heads, u=self.addr_order, p=self.addr_radix)

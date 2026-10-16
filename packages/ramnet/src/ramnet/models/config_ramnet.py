@@ -25,7 +25,7 @@ class RAMNetConfig(PretrainedConfig):
         init_mass (float, optional): Persistence strength of the initial zero state. None defaults to 1 / (addr_radix ** addr_order).
 
         embed_num (list[int] | tuple[int, ...] | int): Number of heads applying Cyclic Address Positional Embedding (CAPE), optionally per layer. 0 disables CAPE; explicit values must not exceed num_attention_heads.
-        addr_temperature (float): Temperature for address localization; smaller values precise memory access.
+        addr_temperature (float | None): Temperature for address localization; smaller values sharpen memory access. None defaults to sqrt(addr_order).
         addr_top_k (tuple[int, int] | list[int] | int | None): Limits sparsity of the address vector. If set, retains only the top-k weights. A two-item tuple/list applies separately to (write_k, read_k); int applies to both.
         addr_top_k_re_norm (bool | tuple[bool, bool] | list[bool]): Whether to re-normalize the address vector after top-k filtering, forcing the top-k entries to sum to 1.0. A bool applies to both write and read; a two-item tuple/list specifies separate (write, read) bools.
 
@@ -89,7 +89,7 @@ class RAMNetConfig(PretrainedConfig):
                 2, 2, 2, 2, 2, 2, 2, 2, 2,
             ),
             # === Address Decoder ===
-            addr_temperature: float = 2.2,
+            addr_temperature: float | None = None,
             addr_top_k: tuple[int, int] | list[int] | int | None = 8,
             addr_top_k_re_norm: bool | tuple[bool, bool] | list[bool] = False,
             # === RAM Readout ===
