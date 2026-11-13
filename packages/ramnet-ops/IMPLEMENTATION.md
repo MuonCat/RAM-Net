@@ -42,7 +42,7 @@ flowchart LR
 
 ## Address indices and CAPE
 
-`top_k_re_norm=False` retains the selected probabilities from the product of per-digit softmax distributions. `True` renormalizes over the selected addresses. The implementation computes this in log space; the renormalized path can use sums of raw logits because the omitted per-digit normalization constants cancel.
+`top_k_re_norm` is in `[0, 1]`. For selected Product Softmax probabilities `q` and `M = sum(q)`, the weights are `q / M**top_k_re_norm`: `0.0` preserves their scale; `1.0` normalizes their sum to one. Computation uses `log(q) - top_k_re_norm * log(M)`, and backward retains the input logits.
 
 `encode_batch_idx` controls the integer stored in `idx`:
 

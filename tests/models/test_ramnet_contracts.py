@@ -136,6 +136,59 @@ class RamNetContractsTest(unittest.TestCase):
             self.assertIs(post_state.mass, state.mass)
         self.assertEqual(cache.get_seq_length(), 4)
 
+    def test_renorm_config_reaches_attention_op(self) -> None:
+        for re_norm, expected in (
+                (0.0, (0.0, 0.0)), (0.5, (0.5, 0.5)),
+                (1.0, (1.0, 1.0)), ((0.25, 0.75), (0.25, 0.75)),
+        ):
+            with self.subTest(re_norm=re_norm):
+                config, model = make_model(
+                    hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                    addr_order=2, addr_radix=4, value_chs=8, vocab_size=64,
+                    addr_top_k_re_norm=re_norm,
+                )
+                import ramnet.layers.ram_attn_block as ram_attn_block
+
+                for layer in model.model.layers:
+                    self.assertEqual(layer.attn.top_k_re_norm, expected)
+                input_ids, mask = make_inputs(config, batch=1, seq_len=5)
+                with torch.no_grad(), patch.object(
+                        ram_attn_block, 'random_access_memory_attention',
+                        wraps=ram_attn_block.random_access_memory_attention,
+                ) as ram_attn:
+                    model.eval()(input_ids, attention_mask=mask, use_cache=False)
+                self.assertEqual(ram_attn.call_count, config.num_hidden_layers)
+                for call in ram_attn.call_args_list:
+                    self.assertEqual(call.kwargs['top_k_re_norm'], expected)
+
+    def test_renorm_config_loads_legacy_booleans(self) -> None:
+        from ramnet import RAMNetConfig
+
+        for legacy, expected in (
+                (False, (0.0, 0.0)), (True, (1.0, 1.0)),
+                ((False, True), (0.0, 1.0)), ([True, False], (1.0, 0.0)),
+                ([False, 0.5], (0.0, 0.5)),
+        ):
+            with self.subTest(re_norm=legacy):
+                config = RAMNetConfig.from_dict({'addr_top_k_re_norm': legacy})
+                with tempfile.TemporaryDirectory() as directory:
+                    config.save_pretrained(directory)
+                    restored = RAMNetConfig.from_pretrained(directory)
+                for loaded in (config, restored):
+                    self.assertEqual(loaded.addr_top_k_re_norm, expected)
+                    for value in loaded.addr_top_k_re_norm:
+                        self.assertIs(type(value), float)
+
+    def test_renorm_config_rejects_invalid_values(self) -> None:
+        _, Config, _ = load_model_classes()
+        for option, error in (
+                (None, TypeError), ('0.5', TypeError), ([0.5], TypeError),
+                (-0.1, ValueError), (1.1, ValueError), (float('nan'), ValueError),
+                (float('inf'), ValueError), ((0.5, -0.1), ValueError),
+        ):
+            with self.subTest(re_norm=option), self.assertRaisesRegex(error, 'addr_top_k_re_norm'):
+                Config(addr_top_k_re_norm=option)
+
     def test_use_cache_flag_cases(self) -> None:
         RAMCache, _, _ = load_model_classes()
         config, model = make_model(use_cache=False)
@@ -159,6 +212,7 @@ class RamNetContractsTest(unittest.TestCase):
             hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
             addr_order=2, addr_radix=4, value_chs=8, vocab_size=64,
             use_cache=False, tie_word_embeddings=True,
+            addr_top_k_re_norm=(0.25, 0.75),
         )
         model.eval()
         input_ids, mask = make_inputs(config, batch=1, seq_len=6)
@@ -177,6 +231,7 @@ class RamNetContractsTest(unittest.TestCase):
             model.save_pretrained(directory)
             restored_config = AutoConfig.from_pretrained(directory)
             self.assertFalse(restored_config.use_cache)
+            self.assertEqual(restored_config.addr_top_k_re_norm, (0.25, 0.75))
             restored = AutoModelForCausalLM.from_pretrained(directory).cuda().eval()
             self.assertIs(restored.get_input_embeddings().weight, restored.get_output_embeddings().weight)
             restored_state = restored.state_dict()

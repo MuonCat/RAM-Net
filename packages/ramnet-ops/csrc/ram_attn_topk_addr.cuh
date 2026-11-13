@@ -5,7 +5,7 @@ struct TopKAddrConfig {
     int_t B, H, U, P, A, T, E;
 
     int_t top_k;
-    bool top_k_re_norm;
+    float top_k_re_norm;
 
     bool addr_val_neg;
     bool encode_batch_idx;
@@ -14,7 +14,7 @@ struct TopKAddrConfig {
         const int_t B_, const int_t H_,
         const int_t U_, const int_t P_, const int_t A_,
         const int_t T_, const int_t E_,
-        const int_t top_k_, const bool top_k_re_norm_,
+        const int_t top_k_, const float top_k_re_norm_,
         const bool addr_val_neg_,
         const bool encode_batch_idx_
     )

@@ -24,7 +24,7 @@ def run_cuda_ram(
         *inputs,
         mask, 1, position_ids,
         (2, 3),
-        (False, True),
+        (0.25, 0.75),
         mass_aware, eps,
         inplace,
     )

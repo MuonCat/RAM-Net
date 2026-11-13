@@ -22,7 +22,7 @@ class TorchAddressNumericsTest(unittest.TestCase):
         A = P ** U
         positions = torch.arange(T).unsqueeze(0) * 3 + torch.arange(B).unsqueeze(1)
         for dtype, k, re_norm, neg, encode_batch_idx in product(
-                (torch.float32, torch.float64), (1, 4, A), (False, True), (False, True), (False, True),
+                (torch.float32, torch.float64), (1, 4, A), (0.0, 0.5, 1.0), (False, True), (False, True),
         ):
             with self.subTest(dtype=dtype, k=k, re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 addr = torch.randn(B, H, U, P, T * 2, dtype=dtype)[..., ::2].requires_grad_()
@@ -46,7 +46,7 @@ class TorchAddressNumericsTest(unittest.TestCase):
                 dense = (probs[:, :, 1, :, None, :] * probs[:, :, 0, None, :, :]).flatten(-3, -2)
                 selected = dense.gather(-2, content_idx)
                 torch.testing.assert_close(selected.sort(dim=-2).values, dense.topk(k, dim=-2).values.sort(dim=-2).values)
-                ref = selected / selected.sum(dim=-2, keepdim=True) if re_norm else selected
+                ref = selected / selected.sum(dim=-2, keepdim=True).pow(re_norm)
                 ref = -ref if neg else ref
                 grad = torch.randn_like(val)
                 actual, = torch.autograd.grad(val, addr, grad)
@@ -60,7 +60,7 @@ class TorchAddressNumericsTest(unittest.TestCase):
         source[..., 0] = -torch.inf
         source[:, :, 0, :, 1] = -torch.inf
         positions = torch.arange(3).expand(2, -1)
-        for re_norm, neg in product((False, True), repeat=2):
+        for re_norm, neg in product((0.0, 0.5, 1.0), (False, True)):
             with self.subTest(re_norm=re_norm, neg=neg):
                 addr = source.clone().requires_grad_()
                 _, val = _torch_topk_addr(addr, 1, positions, 4, re_norm, neg)
@@ -70,9 +70,40 @@ class TorchAddressNumericsTest(unittest.TestCase):
                 self.assertTrue(torch.isfinite(val).all())
                 self.assertTrue(torch.isfinite(grad).all())
 
+    def test_partial_renorm_gradcheck(self):
+        addr = torch.randn(1, 1, 2, 3, 2, dtype=torch.float64, requires_grad=True)
+        positions = torch.arange(2).view(1, 2)
+        for k in (1, 4, 9):
+            with self.subTest(k=k):
+                self.assertTrue(torch.autograd.gradcheck(
+                    lambda value: _torch_topk_addr(value, 1, positions, k, 0.5)[1],
+                    (addr,), atol=1e-5, rtol=1e-4,
+                ))
+
+    def test_extreme_logits_match_log_reference(self):
+        source = torch.tensor([
+            [[1000.0, -1000.0], [999.0, -999.0], [-1000.0, 1000.0]],
+            [[1000.0, -1000.0], [998.0, -998.0], [-1000.0, 1000.0]],
+        ], dtype=torch.float64).view(1, 1, 2, 3, 2)
+        positions = torch.arange(2).view(1, 2)
+        for k, re_norm in product((1, 4, 9), (0.0, 0.5, 1.0)):
+            with self.subTest(k=k, re_norm=re_norm):
+                addr = source.clone().requires_grad_()
+                idx, val = _torch_topk_addr(addr, 0, positions, k, re_norm)
+                log_prob = addr.log_softmax(dim=-2)
+                dense_log = (log_prob[:, :, 1, :, None, :] + log_prob[:, :, 0, None, :, :]).flatten(-3, -2)
+                selected = dense_log.gather(-2, idx.long())
+                expected = (selected - re_norm * selected.logsumexp(dim=-2, keepdim=True)).exp()
+                upstream = torch.randn_like(val)
+                actual_grad, = torch.autograd.grad(val, addr, upstream)
+                expected_grad, = torch.autograd.grad(expected, addr, upstream)
+                torch.testing.assert_close(val, expected, atol=1e-12, rtol=1e-10)
+                torch.testing.assert_close(actual_grad, expected_grad, atol=1e-12, rtol=1e-10)
+                self.assertTrue(torch.isfinite(actual_grad).all())
+
     @requires_low_precision
     def test_low_precision_uses_fp32_weights(self):
-        for dtype, re_norm in product(low_precision_dtypes(required=True), (False, True)):
+        for dtype, re_norm in product(low_precision_dtypes(required=True), (0.0, 0.5, 1.0)):
             with self.subTest(dtype=dtype, re_norm=re_norm):
                 addr = torch.randn(2, 2, 2, 3, 5).to(dtype).requires_grad_()
                 fp32 = addr.detach().float().requires_grad_()
@@ -95,9 +126,33 @@ class AddressNumericsTest(unittest.TestCase):
 
         self.addr = _cuda_topk_addr
 
+    def test_extreme_and_inactive_addresses(self):
+        case = make_cuda_case(seq_len=31)
+        source = case.w_addr.detach().clone()
+        source[..., 0] = -torch.inf
+        source[:, :, 0, :, 1] = -torch.inf
+        source[..., 2] = source.new_tensor([-1000.0, 998.0, 999.0, 1000.0]).view(1, 1, 1, 4)
+        for k, re_norm in product((1, 16), (0.0, 0.5, 1.0)):
+            with self.subTest(k=k, re_norm=re_norm):
+                results = []
+                for func, dtype in ((self.addr, torch.float32), (_torch_topk_addr, torch.float64)):
+                    addr = source.to(dtype).detach().requires_grad_()
+                    _, val = func(addr, 1, case.position_ids, k, re_norm)
+                    grad, = torch.autograd.grad(val.square().sum(), addr)
+                    torch.testing.assert_close(val[..., :2], torch.zeros_like(val[..., :2]), atol=0, rtol=0)
+                    torch.testing.assert_close(grad[..., :2], torch.zeros_like(grad[..., :2]), atol=0, rtol=0)
+                    self.assertTrue(torch.isfinite(val).all())
+                    self.assertTrue(torch.isfinite(grad).all())
+                    results.append((val.sort(dim=-2).values, grad))
+                assert_close_with_stats(
+                    'EXTREME ADDRESS CUDA == TORCH',
+                    [(name, actual.double(), expected) for name, actual, expected in zip(('val', 'D_addr'), results[0], results[1])],
+                    **FP32_TOLERANCE,
+                )
+
     def test_public_backends_match(self):
         case = make_cuda_case(seq_len=31)
-        for re_norm, neg, encode_batch_idx in product((False, True), repeat=3):
+        for re_norm, neg, encode_batch_idx in product((0.0, 0.5, 1.0), (False, True), (False, True)):
             with self.subTest(re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 inputs, outputs = [], []
                 for backend in ('cuda', 'torch'):
@@ -119,7 +174,7 @@ class AddressNumericsTest(unittest.TestCase):
 
     def test_fp32_matches_torch(self):
         case = make_cuda_case(seq_len=31)
-        for re_norm, neg, encode_batch_idx in product((False, True), repeat=3):
+        for re_norm, neg, encode_batch_idx in product((0.0, 0.5, 1.0), (False, True), (False, True)):
             with self.subTest(re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 source = case.r_addr if neg else case.w_addr
                 addr = source.detach().requires_grad_()
@@ -136,7 +191,7 @@ class AddressNumericsTest(unittest.TestCase):
                     dense.topk(3, dim=-2).values.sort(dim=-2).values,
                     atol=1e-5, rtol=1e-5,
                 )
-                ref = selected / selected.sum(dim=-2, keepdim=True) if re_norm else selected
+                ref = selected / selected.sum(dim=-2, keepdim=True).pow(re_norm)
                 ref = -ref if neg else ref
                 grad = torch.randn_like(val)
                 actual, = torch.autograd.grad(val, addr, grad)
@@ -151,7 +206,7 @@ class AddressNumericsTest(unittest.TestCase):
     def test_low_precision_matches_cuda_fp32(self):
         dtypes = low_precision_dtypes(required=True)
         case = make_cuda_case(seq_len=31)
-        for dtype, re_norm, neg, encode_batch_idx in product(dtypes, (False, True), (False, True), (False, True)):
+        for dtype, re_norm, neg, encode_batch_idx in product(dtypes, (0.0, 0.5, 1.0), (False, True), (False, True)):
             with self.subTest(dtype=dtype, re_norm=re_norm, neg=neg, encode_batch_idx=encode_batch_idx):
                 source = case.r_addr if neg else case.w_addr
                 low = source.to(dtype).detach().requires_grad_()

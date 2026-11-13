@@ -27,7 +27,7 @@ ImplCallableType = Callable[
         int,  # embed_num
         torch.Tensor,  # position_ids
         tuple[int, int] | None,  # top-k
-        tuple[bool, bool],  # top-k renorm (write, read)
+        tuple[float, float],  # top-k renorm exponents (write, read)
         bool,  # mass_aware
         float,  # eps
         bool,  # inplace
@@ -50,7 +50,7 @@ def topk_addr(
         position_ids: torch.Tensor,
 
         top_k: int,
-        top_k_re_norm: bool,
+        top_k_re_norm: float,
 
         addr_val_neg: bool = False,
         encode_batch_idx: bool = True,
@@ -71,13 +71,18 @@ def topk_addr(
     :param embed_num: Number of heads using CAPE-style shift embedding (applied from head 0); must be in ``[0, H]``.
     :param position_ids: Token positions for cyclic address positional embedding, shape (B, T).
     :param top_k: Number of addresses to retain; must be in ``[1, P ** U]``.
-    :param top_k_re_norm: Whether to re-normalize selected weights to sum to 1.0 before applying addr_val_neg.
+    :param top_k_re_norm: In [0, 1]; selected probabilities q become q / sum(q)**top_k_re_norm before applying addr_val_neg.
     :param addr_val_neg: Whether to negate the returned weights.
     :param encode_batch_idx: Whether indices encode ``(b * H + h) * A + a_idx``; False returns ``h * A + a_idx``. CAPE applies in both modes.
     :param impl_backend: Backend implementation: 'torch' or 'cuda'. Use None for auto-selection.
     :return: ``(idx, val)`` with both tensors in shape ``(B, H, K, T)``. Indices are int32; weights are FP32, or FP64 for FP64 input on the Torch backend.
     """
     assert isinstance(addr, torch.Tensor), f"Expected addr to be Tensor, got {type(addr).__name__}."
+    if not isinstance(top_k_re_norm, (int, float)):
+        raise TypeError("`top_k_re_norm` must be a number in [0, 1].")
+    if not 0 <= top_k_re_norm <= 1:
+        raise ValueError("`top_k_re_norm` must be in [0, 1].")
+    top_k_re_norm = float(top_k_re_norm)
 
     if impl_backend not in (None, 'torch', 'cuda'):
         raise ValueError(f"Unsupported impl_backend: {impl_backend!r}.")
@@ -112,7 +117,7 @@ def random_access_memory_attention(
         position_ids: torch.Tensor | None = None,
 
         top_k: tuple[int, int] | list[int] | int | None = 8,
-        top_k_re_norm: bool | tuple[bool, bool] | list[bool] = False,
+        top_k_re_norm: float | tuple[float, float] | list[float] = 0.0,
 
         mass_aware: bool = False,
         eps: float = 1e-12,
@@ -140,7 +145,7 @@ def random_access_memory_attention(
     :param embed_num: Number of heads using CAPE-style shift embedding (applied from head 0); must be in ``[0, H]``.
     :param position_ids: Token positions for cyclic address positional embedding, shape broadcastable to (..., T, ...).
     :param top_k: If set, keeps only the top-k write/read slots; a two-item tuple/list applies separate ``(write_k, read_k)`` values.
-    :param top_k_re_norm: Whether to re-normalize the address vector after top-k filtering, forcing the top-k entries to sum to 1.0. A bool applies to both write and read; a two-item tuple/list specifies separate (write, read) bools.
+    :param top_k_re_norm: In [0, 1]; selected probabilities q become q / sum(q)**top_k_re_norm. A number applies to both write and read; a two-item tuple/list sets separate (write, read) values.
     :param mass_aware: Weight reads by updated memory mass with epsilon-stabilized normalization.
     :param eps: Strictly positive value to avoid division by zero.
     :param t_dim: Index of the time dimension T.
@@ -299,15 +304,17 @@ def random_access_memory_attention(
     assert top_k is None or all(0 < k <= P ** U for k in top_k), f"top_k values must be in the range (0, {P ** U}], but got {top_k}"
 
     # check the top-k re-norm
-    top_k_re_norm_type_error = "`top_k_re_norm` must be a bool or a two-item tuple/list of bools."
-    if isinstance(top_k_re_norm, bool):
+    top_k_re_norm_type_error = "`top_k_re_norm` must be a number or a two-item tuple/list of numbers in [0, 1]."
+    if isinstance(top_k_re_norm, (int, float)):
         top_k_re_norm = (top_k_re_norm, top_k_re_norm)
     elif isinstance(top_k_re_norm, tuple | list):
-        if len(top_k_re_norm) != 2 or not all(isinstance(v, bool) for v in top_k_re_norm):
+        if len(top_k_re_norm) != 2 or not all(isinstance(v, (int, float)) for v in top_k_re_norm):
             raise TypeError(top_k_re_norm_type_error)
-        top_k_re_norm = tuple(top_k_re_norm)
     else:
         raise TypeError(top_k_re_norm_type_error)
+    if not all(0 <= v <= 1 for v in top_k_re_norm):
+        raise ValueError("`top_k_re_norm` exponents must be in [0, 1].")
+    top_k_re_norm = tuple(float(v) for v in top_k_re_norm)
 
     if impl_backend not in (None, 'torch', 'triton', 'cuda'):
         raise ValueError(f"Unsupported impl_backend: {impl_backend!r}.")

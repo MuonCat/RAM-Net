@@ -11,7 +11,7 @@ struct TaskConfig {
     int_t B, H, U, P, A, C, T, E; // batch, heads, order, radix, slots, channels, timesteps, CAPE heads
 
     int_t w_top_k, r_top_k;
-    bool w_top_k_re_norm, r_top_k_re_norm;
+    float w_top_k_re_norm, r_top_k_re_norm;
 
     bool mass_aware;
     float eps;
@@ -23,7 +23,7 @@ struct TaskConfig {
         const int_t T_,
         const int_t E_,
         const int_t w_top_k_, const int_t r_top_k_,
-        const bool w_top_k_re_norm_, const bool r_top_k_re_norm_,
+        const float w_top_k_re_norm_, const float r_top_k_re_norm_,
         const bool mass_aware_,
         const float eps_
     )

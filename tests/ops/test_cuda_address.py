@@ -18,7 +18,7 @@ class CudaAddressTest(unittest.TestCase):
         self.int_dtype = torch.int32
 
     def test_address_gradient_convention(self):
-        for re_norm, encode_batch_idx in product((False, True), repeat=2):
+        for re_norm, encode_batch_idx in product((0.0, 0.5, 1.0), (False, True)):
             with self.subTest(re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                 case = make_cuda_case()
                 w, r = (t.detach().requires_grad_() for t in (case.w_addr, case.r_addr))
@@ -53,7 +53,7 @@ class CudaAddressTest(unittest.TestCase):
 
         case = make_cuda_case(seq_len=31)
         for dtype, re_norm, neg in product(
-                (torch.float32, *low_precision_dtypes()), (False, True), (False, True),
+                (torch.float32, *low_precision_dtypes()), (0.0, 0.5, 1.0), (False, True),
         ):
             with self.subTest(dtype=dtype, re_norm=re_norm, neg=neg):
                 source = case.r_addr if neg else case.w_addr
@@ -83,7 +83,7 @@ class CudaAddressTest(unittest.TestCase):
     def test_single_address_backward_contract(self):
         case = make_cuda_case()
         pos = case.position_ids.to(self.int_dtype)
-        for re_norm, encode_batch_idx in product((False, True), repeat=2):
+        for re_norm, encode_batch_idx in product((0.0, 0.5, 1.0), (False, True)):
             with self.subTest(re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                 addr = case.w_addr.detach().requires_grad_()
                 B, H, U, P, T = addr.shape
@@ -93,7 +93,7 @@ class CudaAddressTest(unittest.TestCase):
                 grad = torch.randn_like(val)
                 expected, = torch.autograd.grad(val, addr, grad)
                 args = (
-                    idx, val.detach(), None if re_norm else addr.detach(), grad,
+                    idx, val.detach(), addr.detach(), grad,
                     1, pos, 3, re_norm, False, (B, H, U, P, P ** U, T), addr.dtype,
                 )
                 actual = torch.ops.ramnet_ops.topk_addr_single_backward(*args)
@@ -102,6 +102,8 @@ class CudaAddressTest(unittest.TestCase):
                     torch.ops.ramnet_ops.topk_addr_single_backward, args,
                     test_utils=("test_schema", "test_faketensor"),
                 )
+                with self.assertRaises(RuntimeError):
+                    torch.ops.ramnet_ops.topk_addr_single_backward(*args[:2], None, *args[3:])
 
     def test_address_and_padded_index_limits(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -113,7 +115,7 @@ class CudaAddressTest(unittest.TestCase):
             addr = torch.empty(1, 1, INT_BITS - 2, 2, 32, device="cuda", dtype=torch.float32)
             pos = torch.empty(1, 32, device="cuda", dtype=self.int_dtype)
             with self.assertRaisesRegex(AssertionError, "Address space overflow"):
-                _cuda_topk_addr(addr, 0, pos, 1, True)
+                _cuda_topk_addr(addr, 0, pos, 1, 1.0)
 
             if INT_BITS == 32:
                 # The original T fits; its next multiple of 32 exceeds the index limit.
@@ -121,4 +123,4 @@ class CudaAddressTest(unittest.TestCase):
                 addr = torch.empty(1, 1, 1, 1, T, device="cuda", dtype=torch.float32)
                 pos = torch.empty(1, T, device="cuda", dtype=self.int_dtype)
                 with self.assertRaisesRegex(AssertionError, "CUDA index overflow"):
-                    _cuda_topk_addr(addr, 0, pos, 1, True)
+                    _cuda_topk_addr(addr, 0, pos, 1, 1.0)

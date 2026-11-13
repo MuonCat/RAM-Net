@@ -112,27 +112,27 @@ def kronecker_sum(xs: torch.Tensor) -> torch.Tensor:
     return combo_sum.flatten(start_dim=xs.dim() - 2)
 
 
-def mask_top_k(val: torch.Tensor, top_k: int | None = None, top_k_re_norm: bool = True) -> torch.Tensor:
+def mask_top_k(val: torch.Tensor, top_k: int | None = None, top_k_re_norm: float = 1.0) -> torch.Tensor:
     """Mask all but the largest ``top_k`` log-values.
 
-    When filtering removes values, ``top_k_re_norm=True`` applies log-softmax
-    to the retained values. ``top_k`` must be in ``[1, val.size(-1)]``.
+    Subtract ``top_k_re_norm`` times the retained log-sum-exp, with ``top_k_re_norm`` in [0, 1]. ``top_k`` must be in ``[1, val.size(-1)]``.
     """
     assert isinstance(val, torch.Tensor), f"Expected val to be Tensor, got {type(val).__name__}."
     assert val.ndim > 0 and val.size(-1) > 0, f"Expected val with non-empty final dimension, got shape={tuple(val.shape)}."
     assert top_k is None or isinstance(top_k, int), f"Expected top_k to be int or None, got {type(top_k).__name__}."
     assert top_k is None or 0 < top_k <= val.size(-1), f"top_k must be in [1, {val.size(-1)}], but got {top_k}."
+    assert isinstance(top_k_re_norm, (int, float)) and 0 <= top_k_re_norm <= 1, f"Expected top_k_re_norm in [0, 1], got {top_k_re_norm!r}."
     if top_k is not None and top_k < val.size(-1):
         _, idx = torch.topk(val, top_k, dim=-1)
         mask = torch.zeros_like(val, dtype=torch.bool)
         mask.scatter_(dim=-1, index=idx, value=True)
         val = val.masked_fill(~mask, -torch.inf)
-        if top_k_re_norm:
-            val = torch.log_softmax(val, dim=-1)
+    if top_k_re_norm != 0:
+        val = val - float(top_k_re_norm) * val.logsumexp(dim=-1, keepdim=True)
     return val
 
 
-def addr_decode(addr: torch.Tensor, position_ids: torch.Tensor, embed_num: int = 0, top_k: int | None = None, top_k_re_norm: bool = False) -> torch.Tensor:
+def addr_decode(addr: torch.Tensor, position_ids: torch.Tensor, embed_num: int = 0, top_k: int | None = None, top_k_re_norm: float = 0.0) -> torch.Tensor:
     """Decode logits from ``(T, B, H, U, P)`` to weights in ``(T, B, H, P ** U)``."""
     assert isinstance(addr, torch.Tensor) and isinstance(position_ids, torch.Tensor), f"Expected addr/position_ids tensors, got {type(addr).__name__}/{type(position_ids).__name__}."
     assert addr.ndim == 5, f"Expected addr in (T, B, H, U, P), but got shape {tuple(addr.shape)}."
@@ -156,7 +156,7 @@ def _torch_topk_addr(
         position_ids: torch.Tensor,  # (B, T)
 
         top_k: int,
-        top_k_re_norm: bool,
+        top_k_re_norm: float,
 
         addr_val_neg: bool = False,
         encode_batch_idx: bool = True,
@@ -176,7 +176,7 @@ def _torch_topk_addr(
     :param embed_num: Number of heads using CAPE-style shift embedding (applied from head 0); must be in ``[0, H]``.
     :param position_ids: Token positions for cyclic address positional embedding, shape (B, T).
     :param top_k: Number of addresses to retain; must be in ``[1, P ** U]``.
-    :param top_k_re_norm: Whether to re-normalize selected weights to sum to 1.0 before applying addr_val_neg.
+    :param top_k_re_norm: In [0, 1]; selected probabilities q become q / sum(q)**top_k_re_norm before applying addr_val_neg.
     :param addr_val_neg: Whether to negate the returned weights.
     :param encode_batch_idx: Whether indices encode ``(b * H + h) * A + a_idx``; False returns ``h * A + a_idx``. CAPE applies in both modes.
     :return: ``(idx, val)`` with both tensors in shape ``(B, H, K, T)``. Indices are int32; weights are FP32, or FP64 for FP64 input.
@@ -191,6 +191,7 @@ def _torch_topk_addr(
     acc_type = torch.float64 if addr.dtype == torch.float64 else torch.float32
 
     assert 0 < top_k <= A, f"Expected top_k in [1, A={A}], got {top_k!r}."
+    assert isinstance(top_k_re_norm, (int, float)) and 0 <= top_k_re_norm <= 1, f"Expected top_k_re_norm in [0, 1], got {top_k_re_norm!r}."
     assert position_ids.shape == (B, T), f"Expected position_ids.shape={(B, T)}."
 
     logits = addr.to(acc_type)
@@ -199,13 +200,14 @@ def _torch_topk_addr(
     inactive = torch.isneginf(logits).all(dim=-2).any(dim=-2)  # (B, H, T)
     logits = logits.masked_fill(inactive[:, :, None, None, :], 0)
 
-    # Decode the complete distribution, including CAPE, before selecting Top-K.
-    weights = addr_decode(einops.rearrange(logits, 'b h u p t -> t b h u p').log_softmax(dim=-1), position_ids, embed_num)  # (T, B, H, A)
-    weights = einops.rearrange(weights, 't b h a -> b h a t')
-    val, idx = torch.topk(weights, top_k, dim=-2)  # (B, H, K, T)
-    if top_k_re_norm:
-        val = val / val.sum(dim=-2, keepdim=True)
-    val = val.masked_fill(inactive.unsqueeze(-2), 0)
+    # Keep selection and normalization in log-space to avoid premature underflow.
+    logits = kronecker_sum(einops.rearrange(logits, 'b h u p t -> t b h u p').log_softmax(dim=-1))
+    logits = circular_shift_embed(logits, position_ids, embed_num)  # (T, B, H, A)
+    logits = einops.rearrange(logits, 't b h a -> b h a t')
+    val, idx = torch.topk(logits, top_k, dim=-2)  # (B, H, K, T)
+    if top_k_re_norm != 0:
+        val = val - float(top_k_re_norm) * val.logsumexp(dim=-2, keepdim=True)
+    val = val.exp().masked_fill(inactive.unsqueeze(-2), 0)
 
     slot_offset = torch.arange(index_batches * H, device=addr.device).view(index_batches, H, 1, 1) * A
     idx = (idx + slot_offset).to(torch.int32)
@@ -227,7 +229,7 @@ def _torch_ram_attn(
         position_ids: torch.Tensor,  # (B, T)
 
         top_k: tuple[int, int] | None,
-        top_k_re_norm: tuple[bool, bool],
+        top_k_re_norm: tuple[float, float],
 
         mass_aware: bool,
         eps: float,
@@ -241,8 +243,8 @@ def _torch_ram_attn(
         assert init_slot.dtype == init_mass.dtype == acc_type, f"Expected inplace state dtype={acc_type}, got slot={init_slot.dtype}, mass={init_mass.dtype}."
 
     w_top_k, r_top_k = top_k or (None, None)
-    assert isinstance(top_k_re_norm, tuple) and len(top_k_re_norm) == 2 and all(isinstance(v, bool) for v in top_k_re_norm), f"Expected top_k_re_norm=(write_bool, read_bool), got {top_k_re_norm!r}."
-    w_top_k_re_norm, r_top_k_re_norm = top_k_re_norm
+    assert isinstance(top_k_re_norm, tuple) and len(top_k_re_norm) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in top_k_re_norm), f"Expected top_k_re_norm=(write, read) in [0, 1], got {top_k_re_norm!r}."
+    w_top_k_re_norm, r_top_k_re_norm = (float(v) for v in top_k_re_norm)
     B, _, T, _ = xs.shape
     assert position_ids.shape == (B, T), f"Expected position_ids.shape={(B, T)}, got {tuple(position_ids.shape)}."
     position_ids = position_ids.to(device=xs.device, dtype=torch.long, non_blocking=True)

@@ -231,7 +231,7 @@ struct IdxValList {
         }
     }
 
-    __device__ __forceinline__ void topk_log_softmax(const int_t max_size = N, const int_t lane = 0) {
+    __device__ __forceinline__ void topk_log_softmax(const int_t max_size = N, const int_t lane = 0, const acc_t top_k_re_norm = 1) {
         // apply log-softmax on the topk, where topk must be sorted
         const acc_t max_log = val[0][lane];
 
@@ -247,7 +247,7 @@ struct IdxValList {
         const acc_t log_sum_exp = get_log<acc_t>(sum_exp);
 #pragma unroll
         for (int_t i = 0; i < N; ++i)
-            val[i][lane] = (val[i][lane] - max_log) - log_sum_exp; // remove the max first
+            val[i][lane] = (val[i][lane] - max_log) + (1 - top_k_re_norm) * max_log - top_k_re_norm * log_sum_exp; // remove the max first
     }
 
     template<int_t M>
@@ -261,7 +261,7 @@ struct IdxValList {
         for (int_t i = 0; i < M; ++i)
             frontier[i] = 0;
 
-#pragma unroll 8
+#pragma unroll
         for (int_t k = 0; k < N; ++k) {
             acc_t best_val = -std::numeric_limits<acc_t>::infinity();
             int_t best_r = -1, best_idx = -1;

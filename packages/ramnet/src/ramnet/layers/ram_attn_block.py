@@ -36,8 +36,8 @@ class RAMNetAttention(torch.nn.Module):
 
     :param addr_temperature: Temperature for address localization; smaller values sharpen memory access. None defaults to sqrt(addr_order).
     :param top_k: Limits sparsity of the address vector. A two-item tuple/list applies separately to (write_k, read_k); int applies to both. Active state per token is proportional to k * d_v.
-    :param top_k_re_norm: Whether to re-normalize the address vector after top-k filtering, forcing the top-k entries to sum to 1.0.
-        A bool applies to both write and read; a two-item tuple/list specifies separate (write, read) bools.
+    :param top_k_re_norm: In [0, 1]; selected probabilities q become q / sum(q)**top_k_re_norm.
+        A number applies to both write and read; a two-item tuple/list specifies separate (write, read) exponents.
 
     :param mass_aware: Weight reads by updated memory mass with epsilon-stabilized normalization.
     :param output_gate: Element-wise output gate function: 'relu', 'sigmoid', 'silu', 'swish', 'gelu', or None.
@@ -70,7 +70,7 @@ class RAMNetAttention(torch.nn.Module):
             # === Address Decoder ===
             addr_temperature: float | None = None,
             top_k: tuple[int, int] | list[int] | int | None = 8,
-            top_k_re_norm: bool | tuple[bool, bool] | list[bool] = False,
+            top_k_re_norm: float | tuple[float, float] | list[float] = 0.0,
             # === Readout ===
             mass_aware: bool = False,
             output_gate: OutputGateType | None = 'sigmoid',
@@ -94,6 +94,12 @@ class RAMNetAttention(torch.nn.Module):
         assert addr_temperature > 0, f"Expected addr_temperature > 0, got {addr_temperature}."
         assert isinstance(embed_num, int) and 0 <= embed_num <= n_heads, f"Expected embed_num in [0, {n_heads}], got {embed_num!r}."
         assert ram_attn_eps > 0, f"Expected ram_attn_eps > 0, got {ram_attn_eps}."
+        top_k_re_norm = top_k_re_norm if isinstance(top_k_re_norm, (tuple, list)) else (top_k_re_norm, top_k_re_norm)
+        if len(top_k_re_norm) != 2 or not all(isinstance(v, (int, float)) for v in top_k_re_norm):
+            raise TypeError('top_k_re_norm must be a number or a two-item tuple/list of numbers in [0, 1].')
+        if not all(0 <= v <= 1 for v in top_k_re_norm):
+            raise ValueError('top_k_re_norm exponents must be in [0, 1].')
+        top_k_re_norm = tuple(float(v) for v in top_k_re_norm)
         if layer_idx is not None and layer_idx < 0:
             raise ValueError('layer_idx must be non-negative.')
 

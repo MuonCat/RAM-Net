@@ -20,7 +20,7 @@ def _addr_single_backward_fake(
         idx,  # r (B, H, K, T)
         val,  # r (B, H, K, T)
 
-        addr,  # r (B, H, U, P, T), optional logits
+        addr,  # r (B, H, U, P, T)
 
         D_val,  # r (B, H, K, T)
 
@@ -54,7 +54,7 @@ def _addr_single_setup(ctx, inputs, output):
     ctx.save_for_backward(
         idx, val,
         position_ids,
-        None if top_k_re_norm else addr,
+        addr,
     )
     ctx.mark_non_differentiable(idx)
     ctx.set_materialize_grads(False)
@@ -111,8 +111,8 @@ def _addr_backward_fake(
         idx,  # r (B, H, Kw + Kr, T)
         val,  # r (B, H, Kw + Kr, T)
 
-        w_addr,  # r (B, H, U, P, T), optional logits
-        r_addr,  # r (B, H, U, P, T), optional logits
+        w_addr,  # r (B, H, U, P, T)
+        r_addr,  # r (B, H, U, P, T)
 
         D_val,  # r (B, H, Kw + Kr, T), read gradients w.r.t. positive weights
 
@@ -143,7 +143,7 @@ def _addr_setup(ctx, inputs, output):
     ctx.save_for_backward(
         idx, val,
         position_ids,
-        None if w_re_norm else w_addr, None if r_re_norm else r_addr,
+        w_addr, r_addr,
     )
     ctx.mark_non_differentiable(idx)
     ctx.set_materialize_grads(False)

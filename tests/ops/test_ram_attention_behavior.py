@@ -26,6 +26,17 @@ class RamAttentionBehaviorTest(unittest.TestCase):
     def setUp(self):
         self.ram = require_cuda_ops()
 
+    def test_partial_renorm_autoregressive_matches_parallel(self):
+        case = make_ram_case(batch=2, heads=4, order=2, channels=7, seq_len=5, masked=False)
+        for top_k, re_norm, mass_aware in product(
+                ((1, 1), (3, 5), (16, 16)), ((0.5, 0.5), (0.25, 0.75)), (False, True),
+        ):
+            with self.subTest(top_k=top_k, re_norm=re_norm, mass_aware=mass_aware):
+                options = dict(top_k=top_k, top_k_re_norm=re_norm, mass_aware=mass_aware, grad=False)
+                actual = gather_ram_result(self.ram, case, chunk_size=1, **options)
+                expected = gather_ram_result(self.ram, case, **options)
+                assert_close_with_stats('PARTIAL RENORM AR == PARALLEL', ram_masked_pairs(actual, expected), **BEHAVIOR_TOLERANCE)
+
     def test_mask_and_positions_match_compact_sequence(self):
         case = make_ram_case(batch=2, heads=4, order=3, seq_len=65)
         for shifted, mass_aware in product((False, True), repeat=2):

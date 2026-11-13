@@ -18,7 +18,7 @@ class CudaCompileTest(unittest.TestCase):
         from ramnet_ops.impl.cuda_impl import _cuda_topk_addr
 
         for backend in COMPILE_BACKENDS:
-            for re_norm, encode_batch_idx in product((False, True), repeat=2):
+            for re_norm, encode_batch_idx in product((0.0, 0.5, 1.0), (False, True)):
                 with self.subTest(backend=backend, re_norm=re_norm, encode_batch_idx=encode_batch_idx):
                     def forward(addr, position_ids):
                         return _cuda_topk_addr(addr, 1, position_ids, 3, re_norm, True, encode_batch_idx=encode_batch_idx)

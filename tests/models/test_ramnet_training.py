@@ -29,7 +29,7 @@ MODEL_SMOKE_CASES = (
     ("learnable_asymmetric_top_k", {
         "gamma_mode": "learnable",
         "addr_top_k": (4, 12),
-        "addr_top_k_re_norm": (False, True),
+        "addr_top_k_re_norm": (0.25, 0.75),
     }),
     ("layerwise_fused_norm", {
         "embed_num": (0, 4),

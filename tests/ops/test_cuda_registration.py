@@ -26,11 +26,11 @@ class CudaRegistrationTest(unittest.TestCase):
                 pos = case.position_ids.to(self.int_dtype)
                 torch.library.opcheck(
                     torch.ops.ramnet_ops.topk_addr_single_forward,
-                    (w, 1, 4 ** order, pos, 2, False),
+                    (w, 1, 4 ** order, pos, 2, 0.0),
                     test_utils=checks,
                 )
                 for (addr, k, re_norm, neg), encode_batch_idx in product(
-                        ((w, 2, False, False), (r, 3, True, True)), (False, True),
+                        ((w, 2, 0.5, False), (r, 3, 1.0, True)), (False, True),
                 ):
                     torch.library.opcheck(
                         torch.ops.ramnet_ops.topk_addr_single_forward,
@@ -47,7 +47,7 @@ class CudaRegistrationTest(unittest.TestCase):
                     w, r,
                     1, 4 ** order, pos,
                     2, 3,
-                    False, True,
+                    0.25, 0.75,
                 )
                 for encode_batch_idx in (False, True):
                     torch.library.opcheck(
@@ -75,7 +75,7 @@ class CudaRegistrationTest(unittest.TestCase):
             case.w_addr, case.r_addr,
             1, 16, pos,
             2, 3,
-            False, True,
+            0.25, 0.75,
         )
         meta = gather_segment(idx, None, 16)
         torch.library.opcheck(
@@ -98,7 +98,7 @@ class CudaRegistrationTest(unittest.TestCase):
                 case.init_slot.clone(), case.init_mass.clone(),
                 torch.empty(0, device="cuda", dtype=torch.bool), 1, pos[:, 0],
                 2, 3,
-                False, True,
+                0.25, 0.75,
                 True, 1e-6,
             ),
             test_utils=("test_schema", "test_faketensor"),
@@ -117,7 +117,7 @@ class CudaRegistrationTest(unittest.TestCase):
                     inputs[0], inputs[1],
                     1, 4 ** order, case.position_ids.to(self.int_dtype),
                     2, 3,
-                    False, True,
+                    0.25, 0.75,
                 )
                 for layout_mask in (None, mask):
                     meta = gather_segment(idx, layout_mask, 4 ** order)

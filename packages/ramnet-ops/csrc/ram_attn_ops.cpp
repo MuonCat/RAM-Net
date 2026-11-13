@@ -11,15 +11,16 @@ namespace ramnet_ops {
             const int64_t B, const int64_t H,
             const int64_t U, const int64_t P, const int64_t A,
             const int64_t T, const int64_t E,
-            const int64_t K, const bool re_norm,
+            const int64_t K, const double re_norm,
             const bool addr_val_neg = false,
             const bool encode_batch_idx = true
         ) {
+            RAMNET_CHECK(0.0 <= re_norm && re_norm <= 1.0, "top_k_re_norm must be in [0, 1].");
             return {
                 static_cast<int_t>(B), static_cast<int_t>(H),
                 static_cast<int_t>(U), static_cast<int_t>(P), static_cast<int_t>(A),
                 static_cast<int_t>(T), static_cast<int_t>(E),
-                static_cast<int_t>(K), re_norm,
+                static_cast<int_t>(K), static_cast<float>(re_norm),
                 addr_val_neg, encode_batch_idx
             };
         }
@@ -67,7 +68,7 @@ namespace ramnet_ops {
         const Tensor &position_ids, // r (B, T)
 
         const int64_t top_k,
-        const bool top_k_re_norm,
+        const double top_k_re_norm,
 
         const bool addr_val_neg,
         const bool encode_batch_idx
@@ -94,31 +95,30 @@ namespace ramnet_ops {
     }
 
     Tensor topk_addr_single_backward(
-        const Tensor &idx, //                 r (B, H, K, T)
-        const Tensor &val, //                 r (B, H, K, T)
+        const Tensor &idx, //          r (B, H, K, T)
+        const Tensor &val, //          r (B, H, K, T)
 
-        const std::optional<Tensor> &addr, // r (B, H, U, P, T), optional logits
+        const Tensor &addr, //         r (B, H, U, P, T)
 
-        const Tensor &D_val, //               r (B, H, K, T)
+        const Tensor &D_val, //        r (B, H, K, T)
 
         const int64_t embed_num,
-        const Tensor &position_ids, //        r (B, T)
+        const Tensor &position_ids, // r (B, T)
 
         const int64_t top_k,
 
-        const bool top_k_re_norm,
+        const double top_k_re_norm,
         const bool addr_val_neg,
 
         const torch_api::IntArrayRef shape, // (B, H, U, P, A, T)
         const torch_api::ScalarType dtype
     ) {
         RAMNET_CHECK(shape.size() == 6, "Expected address dimensions (B, H, U, P, A, T).");
-        RAMNET_CHECK(top_k_re_norm || addr.has_value(), "Address logits are required when top_k_re_norm is false.");
         const auto B = shape[0], H = shape[1], U = shape[2], P = shape[3], A = shape[4], T = shape[5];
         const auto cfg = address_config(B, H, U, P, A, T, embed_num, top_k, top_k_re_norm, addr_val_neg);
 
 
-        auto D_addr = top_k_re_norm ? torch_api::empty({B, H, U, P, T}, dtype, val.device()) : torch_api::clone(*addr);
+        auto D_addr = torch_api::clone(addr);
         auto grad = torch_api::to(D_val, acc_dtype); // r (B, H, K, T)
         if (addr_val_neg)
             grad = torch_api::neg(grad);
@@ -145,8 +145,8 @@ namespace ramnet_ops {
         const int64_t w_top_k,
         const int64_t r_top_k,
 
-        const bool w_re_norm,
-        const bool r_re_norm,
+        const double w_re_norm,
+        const double r_re_norm,
         const bool encode_batch_idx
     ) {
         const auto B = w_addr.size(0), H = w_addr.size(1), U = w_addr.size(2), P = w_addr.size(3), T = w_addr.size(4);
@@ -175,35 +175,33 @@ namespace ramnet_ops {
     }
 
     TensorPair topk_addr_backward(
-        const Tensor &idx, //                   r (B, H, Kw + Kr, T)
-        const Tensor &val, //                   r (B, H, Kw + Kr, T)
+        const Tensor &idx, //          r (B, H, Kw + Kr, T)
+        const Tensor &val, //          r (B, H, Kw + Kr, T)
 
-        const std::optional<Tensor> &w_addr, // r (B, H, U, P, T), optional logits
-        const std::optional<Tensor> &r_addr, // r (B, H, U, P, T), optional logits
+        const Tensor &w_addr, //       r (B, H, U, P, T)
+        const Tensor &r_addr, //       r (B, H, U, P, T)
 
-        const Tensor &D_val, //                 r (B, H, Kw + Kr, T), read gradients w.r.t. positive weights
+        const Tensor &D_val, //        r (B, H, Kw + Kr, T), read gradients w.r.t. positive weights
 
         const int64_t embed_num,
-        const Tensor &position_ids, //          r (B, T)
+        const Tensor &position_ids, // r (B, T)
 
         const int64_t w_top_k,
         const int64_t r_top_k,
 
-        const bool w_re_norm,
-        const bool r_re_norm,
+        const double w_re_norm,
+        const double r_re_norm,
 
         const torch_api::IntArrayRef shape, // (B, H, U, P, A, T)
         const torch_api::ScalarType dtype
     ) {
         RAMNET_CHECK(shape.size() == 6, "Expected address dimensions (B, H, U, P, A, T).");
-        RAMNET_CHECK(w_re_norm || w_addr.has_value(), "Write logits are required when w_re_norm is false.");
-        RAMNET_CHECK(r_re_norm || r_addr.has_value(), "Read logits are required when r_re_norm is false.");
         const auto B = shape[0], H = shape[1], U = shape[2], P = shape[3], A = shape[4], T = shape[5];
         const auto w_cfg = address_config(B, H, U, P, A, T, embed_num, w_top_k, w_re_norm, false);
         const auto r_cfg = address_config(B, H, U, P, A, T, embed_num, r_top_k, r_re_norm, true);
 
-        auto D_w = w_re_norm ? torch_api::empty({B, H, U, P, T}, dtype, val.device()) : torch_api::clone(*w_addr);
-        auto D_r = r_re_norm ? torch_api::empty({B, H, U, P, T}, dtype, val.device()) : torch_api::clone(*r_addr);
+        auto D_w = torch_api::clone(w_addr);
+        auto D_r = torch_api::clone(r_addr);
         const auto grad = torch_api::to(D_val, acc_dtype);
         const auto pos = torch_api::contiguous(position_ids);
 
@@ -365,18 +363,20 @@ namespace ramnet_ops {
         const int64_t w_top_k,
         const int64_t r_top_k,
 
-        const bool w_re_norm,
-        const bool r_re_norm,
+        const double w_re_norm,
+        const double r_re_norm,
 
         const bool mass_aware,
         const double eps
     ) {
+        RAMNET_CHECK(0.0 <= w_re_norm && w_re_norm <= 1.0, "w_re_norm must be in [0, 1].");
+        RAMNET_CHECK(0.0 <= r_re_norm && r_re_norm <= 1.0, "r_re_norm must be in [0, 1].");
         const AutoregressiveConfig cfg{
             static_cast<int_t>(x.size(0)), static_cast<int_t>(x.size(1)),
             static_cast<int_t>(w_addr.size(2)), static_cast<int_t>(w_addr.size(3)), static_cast<int_t>(slot.size(2)),
             static_cast<int_t>(x.size(2)), static_cast<int_t>(embed_num),
             static_cast<int_t>(w_top_k), static_cast<int_t>(r_top_k),
-            w_re_norm, r_re_norm,
+            static_cast<float>(w_re_norm), static_cast<float>(r_re_norm),
             mass_aware, static_cast<acc_t>(eps)
         };
 

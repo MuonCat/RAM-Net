@@ -47,7 +47,7 @@ Python >= 3.10
 ramnet
 |-- torch >= 2.5
 |-- einops
-|-- ramnet-ops >= 0.1.0b0
+|-- ramnet-ops >= 0.1.0rc3
 |   `-- numpy
 |-- transformers >= 4.57.3
 `-- flash-linear-attention >= 0.3.2
@@ -215,7 +215,7 @@ Blocks use pre-norm RMSNorm; `fuse_norm` selects its fused implementation.
 Models support `input_ids` or `inputs_embeds`, `return_dict`, hidden-state outputs, and `logits_to_keep`.
 
 - `addr_top_k` sets the number of selected slots for both writing and reading; a `(write_k, read_k)` pair specifies separate counts.
-- `addr_top_k_re_norm` explicitly enables renormalization after Top-K: a bool for both sides, or a two-item tuple/list of `(write, read)` bools; defaults to `False`.
+- `addr_top_k_re_norm` sets `top_k_re_norm` in `[0, 1]`, default `0.0`: selected probabilities `q` become `q / sum(q)**top_k_re_norm`. A number applies to both sides; a two-item tuple/list sets separate `(write, read)` values. Legacy `False`/`True` convert to `0.0`/`1.0`.
 - `output_norm` enables head-wise RMSNorm; `mass_aware` enables mass-weighted reads.
 
 See [RAMNetConfig](src/ramnet/models/config_ramnet.py) for the full parameter list and defaults.

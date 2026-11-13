@@ -66,10 +66,14 @@ class RamAttentionApiTest(unittest.TestCase):
         values = torch.zeros(1, 1, 1, 4)
 
         cases = (
-            (False, (False, False)),
-            (True, (True, True)),
-            ((True, False), (True, False)),
-            ([False, True], (False, True)),
+            (0.0, (0.0, 0.0)),
+            (0.5, (0.5, 0.5)),
+            (1.0, (1.0, 1.0)),
+            ((0.25, 0.75), (0.25, 0.75)),
+            ([0.75, 0.25], (0.75, 0.25)),
+            ((0, 1), (0.0, 1.0)),
+            (True, (1.0, 1.0)),
+            (False, (0.0, 0.0)),
         )
         for option, expected in cases:
             with self.subTest(top_k_re_norm=option):
@@ -86,7 +90,7 @@ class RamAttentionApiTest(unittest.TestCase):
     def test_api_top_k_re_norm_rejects_invalid_values(self) -> None:
         addresses = torch.zeros(1, 1, 1, 1, 16)
         values = torch.zeros(1, 1, 1, 4)
-        invalid_options = (None, 1, (0, 1), [True], (True, False, True))
+        invalid_options = (None, '0.5', [0.5], (0.0, 0.5, 1.0), (0.5, None))
 
         with patch.object(ram_attn_module, "_torch_ram_attn") as impl:
             for option in invalid_options:
@@ -96,6 +100,15 @@ class RamAttentionApiTest(unittest.TestCase):
                         values,
                         top_k_re_norm=option,
                         impl_backend='torch',
+                    )
+            impl.assert_not_called()
+
+        with patch.object(ram_attn_module, "_torch_ram_attn") as impl:
+            for option in (-0.1, 1.1, float('nan'), float('inf'), -float('inf'), (0.0, 1.1), (float('nan'), 0.5)):
+                with self.subTest(top_k_re_norm=option), self.assertRaisesRegex(ValueError, 'top_k_re_norm'):
+                    ram_attn_module.random_access_memory_attention(
+                        addresses, addresses, values,
+                        top_k_re_norm=option, impl_backend='torch',
                     )
             impl.assert_not_called()
 
@@ -109,9 +122,9 @@ class TopKAddressApiTest(unittest.TestCase):
         self.assertIs(topk_addr, ram_attn_module.topk_addr)
         addr = torch.randn(2, 2, 2, 3, 5)
         positions = torch.arange(5).expand(2, -1)
-        expected = topk_addr(addr, 1, positions, 4, False, impl_backend='torch')
+        expected = topk_addr(addr, 1, positions, 4, 0.0, impl_backend='torch')
         with patch.object(ram_attn_module, '_cuda_topk_addr') as cuda:
-            actual = topk_addr(addr, 1, positions, 4, False)
+            actual = topk_addr(addr, 1, positions, 4, 0.0)
             cuda.assert_not_called()
         for actual_tensor, expected_tensor in zip(actual, expected):
             torch.testing.assert_close(actual_tensor, expected_tensor, atol=0, rtol=0)
@@ -119,18 +132,29 @@ class TopKAddressApiTest(unittest.TestCase):
     def test_explicit_backend_forwards_options(self):
         addr = torch.zeros(2, 2, 2, 3, 5)
         positions = torch.arange(5).expand(2, -1)
-        args = (addr, 1, positions, 4, True, True, False)
+        args = (addr, 1, positions, 4, 0.5, True, False)
         for backend in ('torch', 'cuda'):
             with self.subTest(backend=backend):
                 with patch.object(ram_attn_module, f'_{backend}_topk_addr', return_value=(None, None)) as impl:
                     ram_attn_module.topk_addr(*args, impl_backend=backend)
                     impl.assert_called_once_with(*args)
 
+    def test_top_k_re_norm_rejects_invalid_values(self):
+        addr = torch.zeros(1, 1, 1, 2, 1)
+        positions = torch.zeros(1, 1, dtype=torch.long)
+        for option, error in (
+                (None, TypeError), ('0.5', TypeError), ((0.25, 0.75), TypeError),
+                (-0.1, ValueError), (1.1, ValueError), (float('nan'), ValueError),
+                (float('inf'), ValueError), (-float('inf'), ValueError),
+        ):
+            with self.subTest(top_k_re_norm=option), self.assertRaisesRegex(error, 'top_k_re_norm'):
+                ram_attn_module.topk_addr(addr, 0, positions, 1, option, impl_backend='torch')
+
     def test_invalid_or_unavailable_backend(self):
         addr = torch.zeros(1, 1, 1, 2, 1)
         positions = torch.zeros(1, 1, dtype=torch.long)
         with self.assertRaisesRegex(ValueError, 'impl_backend'):
-            ram_attn_module.topk_addr(addr, 0, positions, 1, False, impl_backend='invalid')
+            ram_attn_module.topk_addr(addr, 0, positions, 1, 0.0, impl_backend='invalid')
         with patch.object(ram_attn_module, '_cuda_topk_addr', None):
             with self.assertRaisesRegex(RuntimeError, 'CUDA address decoder is unavailable'):
-                ram_attn_module.topk_addr(addr, 0, positions, 1, False, impl_backend='cuda')
+                ram_attn_module.topk_addr(addr, 0, positions, 1, 0.0, impl_backend='cuda')

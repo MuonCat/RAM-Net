@@ -27,7 +27,7 @@ class RAMNetConfig(PretrainedConfig):
         embed_num (list[int] | tuple[int, ...] | int): Number of heads applying Cyclic Address Positional Embedding (CAPE), optionally per layer. 0 disables CAPE; explicit values must not exceed num_attention_heads.
         addr_temperature (float | None): Temperature for address localization; smaller values sharpen memory access. None defaults to sqrt(addr_order).
         addr_top_k (tuple[int, int] | list[int] | int | None): Limits sparsity of the address vector. If set, retains only the top-k weights. A two-item tuple/list applies separately to (write_k, read_k); int applies to both.
-        addr_top_k_re_norm (bool | tuple[bool, bool] | list[bool]): Whether to re-normalize the address vector after top-k filtering, forcing the top-k entries to sum to 1.0. A bool applies to both write and read; a two-item tuple/list specifies separate (write, read) bools.
+        addr_top_k_re_norm (float | bool | tuple[float | bool, float | bool] | list[float | bool]): Sets top_k_re_norm in [0, 1] for q / sum(q)**top_k_re_norm. A number applies to both write and read; a two-item tuple/list sets separate (write, read) values. Legacy False/True convert to 0.0/1.0.
 
         mass_aware (bool): Weight reads by updated memory mass with epsilon-stabilized normalization.
         output_gate (Literal['relu', 'sigmoid', 'silu', 'swish', 'gelu'] | None): Element-wise output gate function name. Use None to disable output gating.
@@ -91,7 +91,7 @@ class RAMNetConfig(PretrainedConfig):
             # === Address Decoder ===
             addr_temperature: float | None = None,
             addr_top_k: tuple[int, int] | list[int] | int | None = 8,
-            addr_top_k_re_norm: bool | tuple[bool, bool] | list[bool] = False,
+            addr_top_k_re_norm: float | bool | tuple[float | bool, float | bool] | list[float | bool] = 0.0,
             # === RAM Readout ===
             mass_aware: bool = False,
             output_gate: Literal['relu', 'sigmoid', 'silu', 'swish', 'gelu'] | None = "sigmoid",
@@ -129,6 +129,13 @@ class RAMNetConfig(PretrainedConfig):
     ) -> None:
         if isinstance(embed_num, (list, tuple)) and len(embed_num) > num_hidden_layers:
             raise ValueError('embed_num has more entries than num_hidden_layers.')
+        addr_top_k_re_norm = addr_top_k_re_norm if isinstance(addr_top_k_re_norm, (tuple, list)) else (addr_top_k_re_norm, addr_top_k_re_norm)
+        if len(addr_top_k_re_norm) != 2 or not all(isinstance(v, (int, float)) for v in addr_top_k_re_norm):
+            raise TypeError('addr_top_k_re_norm must be a number or a two-item tuple/list of numbers in [0, 1].')
+        if not all(0 <= v <= 1 for v in addr_top_k_re_norm):
+            raise ValueError('addr_top_k_re_norm exponents must be in [0, 1].')
+        # Normalize legacy checkpoint booleans along with numeric exponents.
+        addr_top_k_re_norm = tuple(float(v) for v in addr_top_k_re_norm)
 
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads

@@ -83,18 +83,18 @@ Open [GitHub Releases](https://github.com/MuonCat/RAM-Net/releases), select the 
 Choose a wheel using [the selection guide below](#choose-a-matching-wheel), then copy its download link into `python -m pip install "<wheel URL>"`.
 You must select the Torch/CUDA variant yourself; pip does not infer it from your environment.
 
-With the matching PyTorch build already installed, the commands look like this for package version `0.1.0rc0`:
+With the matching PyTorch build already installed, the commands look like this for package version `0.1.0rc3`:
 
 Windows x64, **Torch 2.8.0 / CUDA 12.8** (ordinary ABI):
 
 ```bash
-python -m pip install "https://github.com/MuonCat/RAM-Net/releases/download/ramnet-ops%2Fv0.1.0rc0/ramnet_ops-0.1.0rc0-1torch2_8_0cu128-cp310-abi3-win_amd64.whl"
+python -m pip install "https://github.com/MuonCat/RAM-Net/releases/download/ramnet-ops%2Fv0.1.0rc3/ramnet_ops-0.1.0rc3-1torch2_8_0cu128-cp310-abi3-win_amd64.whl"
 ```
 
 Linux x86_64, **Torch ≥ 2.10 / CUDA 12.6** (stable ABI):
 
 ```bash
-python -m pip install "https://github.com/MuonCat/RAM-Net/releases/download/ramnet-ops%2Fv0.1.0rc0/ramnet_ops-0.1.0rc0-1torchabi2_10cu126-cp310-abi3-manylinux_2_35_x86_64.whl"
+python -m pip install "https://github.com/MuonCat/RAM-Net/releases/download/ramnet-ops%2Fv0.1.0rc3/ramnet_ops-0.1.0rc3-1torchabi2_10cu126-cp310-abi3-manylinux_2_35_x86_64.whl"
 ```
 
 ##### Choose a matching wheel
@@ -252,7 +252,7 @@ This example demonstrates the API; it is not an experiment configuration.
 - `mask`: marks valid tokens. Masked tokens are not written to the state, and their outputs should be ignored.
 - `embed_num`: number of heads that use CAPE, counted from head 0. These heads shift each token's addresses by its position.
 - `top_k`: `K`, given as an int or a `(write_k, read_k)` pair. `None` keeps all slots and is supported only by the PyTorch backend.
-- `top_k_re_norm`: explicitly enables renormalization after Top-K. Accepts a bool for both sides, or a two-item tuple/list of `(write, read)` bools; defaults to `False`.
+- `top_k_re_norm`: in `[0, 1]`, default `0.0`; selected probabilities `q` become `q / sum(q)**top_k_re_norm`.
 - `t_dim`: index of the time axis. Dimensions before `H` other than the time axis are broadcast as batch dimensions.
 - `impl_backend`: `'cuda'` or `'torch'`. By default, CUDA inputs use the CUDA backend when supported and otherwise fall back to PyTorch with a warning.
 
@@ -266,7 +266,7 @@ from ramnet_ops import topk_addr
 # addr: (B, H, U, P, T); position_ids: (B, T)
 idx, val = topk_addr(
     addr, embed_num=0, position_ids=position_ids,
-    top_k=8, top_k_re_norm=False,
+    top_k=8, top_k_re_norm=0.5,
     addr_val_neg=False, encode_batch_idx=True,
     impl_backend=None,
 )
@@ -274,7 +274,7 @@ idx, val = topk_addr(
 
 Both outputs have shape `(B, H, top_k, T)`. Indices are int32; weights are FP32. Gradients propagate through `val`.
 `encode_batch_idx=True` returns `(b * H + h) * A + a_idx`; `False` returns `h * A + a_idx`. CAPE applies to the first `embed_num` heads in both modes.
-`top_k_re_norm=True` renormalizes the selected weights; `addr_val_neg=True` negates them.
+For selected probabilities `q`, the returned weights are `q / sum(q)**top_k_re_norm`. Setting `addr_val_neg=True` negates these weights. Legacy `False`/`True` values for `top_k_re_norm` convert to `0.0`/`1.0`.
 Set `impl_backend` explicitly to `'torch'` or `'cuda'`, or leave it as `None` for automatic selection.
 The Torch reference expands all `A = P ** U` scores before selection. Tied scores may select different indices across backends.
 

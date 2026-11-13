@@ -1,6 +1,5 @@
 #pragma once
 #include "torch_compat.h"
-#include <optional>
 #include <tuple>
 
 namespace ramnet_ops {
@@ -18,25 +17,25 @@ namespace ramnet_ops {
         const Tensor &position_ids, // r (B, T)
 
         int64_t top_k,
-        bool top_k_re_norm,
+        double top_k_re_norm,
 
         bool addr_val_neg,
         bool encode_batch_idx
     ); // w: idx/val (B, H, K, T)
 
     Tensor topk_addr_single_backward(
-        const Tensor &idx, //                 r (B, H, K, T)
-        const Tensor &val, //                 r (B, H, K, T)
+        const Tensor &idx, //          r (B, H, K, T)
+        const Tensor &val, //          r (B, H, K, T)
 
-        const std::optional<Tensor> &addr, // r (B, H, U, P, T), optional logits
+        const Tensor &addr, //         r (B, H, U, P, T)
 
-        const Tensor &D_val, //               r (B, H, K, T)
+        const Tensor &D_val, //        r (B, H, K, T)
 
         int64_t embed_num,
-        const Tensor &position_ids, //        r (B, T)
+        const Tensor &position_ids, // r (B, T)
 
         int64_t top_k,
-        bool top_k_re_norm,
+        double top_k_re_norm,
 
         bool addr_val_neg,
 
@@ -56,28 +55,28 @@ namespace ramnet_ops {
         int64_t w_top_k,
         int64_t r_top_k,
 
-        bool w_re_norm,
-        bool r_re_norm,
+        double w_re_norm,
+        double r_re_norm,
         bool encode_batch_idx
     ); // w: idx/val (B, H, Kw + Kr, T)
 
     TensorPair topk_addr_backward(
-        const Tensor &idx, //                   r (B, H, Kw + Kr, T)
-        const Tensor &val, //                   r (B, H, Kw + Kr, T)
+        const Tensor &idx, //          r (B, H, Kw + Kr, T)
+        const Tensor &val, //          r (B, H, Kw + Kr, T)
 
-        const std::optional<Tensor> &w_addr, // r (B, H, U, P, T), optional logits
-        const std::optional<Tensor> &r_addr, // r (B, H, U, P, T), optional logits
+        const Tensor &w_addr, //       r (B, H, U, P, T)
+        const Tensor &r_addr, //       r (B, H, U, P, T)
 
-        const Tensor &D_val, //                 r (B, H, Kw + Kr, T), read gradients w.r.t. positive weights
+        const Tensor &D_val, //        r (B, H, Kw + Kr, T), read gradients w.r.t. positive weights
 
         int64_t embed_num,
-        const Tensor &position_ids, //          r (B, T)
+        const Tensor &position_ids, // r (B, T)
 
         int64_t w_top_k,
         int64_t r_top_k,
 
-        bool w_re_norm,
-        bool r_re_norm,
+        double w_re_norm,
+        double r_re_norm,
 
         torch_api::IntArrayRef shape, // (B, H, U, P, A, T)
         torch_api::ScalarType dtype
@@ -167,8 +166,8 @@ namespace ramnet_ops {
         int64_t w_top_k,
         int64_t r_top_k,
 
-        bool w_re_norm,
-        bool r_re_norm,
+        double w_re_norm,
+        double r_re_norm,
 
         bool mass_aware,
         double eps

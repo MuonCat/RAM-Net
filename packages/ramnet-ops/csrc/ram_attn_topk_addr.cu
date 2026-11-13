@@ -89,8 +89,7 @@ __global__ void topk_addr_forward_kernel(
                 peer.set(p, p, type_cast<scalar_t, acc_t>(local_addr_ptr[(u * cfg.P + p) * cfg.T + t_idx]));
         peer.odd_even_sort();
 
-        if (!cfg.top_k_re_norm)
-            peer.topk_log_softmax(cfg.P); // log-softmax on sub-vector
+        peer.topk_log_softmax(cfg.P); // log-softmax on sub-vector
 
         /* merge new sub-vector into the main Top-K */
         if (u == 0)
@@ -100,8 +99,8 @@ __global__ void topk_addr_forward_kernel(
     }
 
     /* re-norm the selected Top-K in log domain */
-    if (cfg.top_k_re_norm)
-        main.topk_log_softmax(cfg.top_k, thread_idx);
+    if (cfg.top_k_re_norm != 0)
+        main.topk_log_softmax(cfg.top_k, thread_idx, cfg.top_k_re_norm);
 
     /* Apply CAPE to the first E heads and optionally encode the batch index. */
     int_t *const __restrict__ local_idx_ptr = top_k_addr_ptr.idx + top_k_addr_ptr.idx_stride.offset(b_idx, h_idx, 0, t_idx);
@@ -161,25 +160,20 @@ __global__ void topk_addr_backward_kernel(
             D_topk[k] = local_D_topk_ptr[k * D_topk_stride.k];
         }
 
-    if (cfg.top_k_re_norm) {
-        /* backward the softmax if re-norm */
-        acc_t D_topk_sum = 0;
+    acc_t D_topk_sum = 0, topk_sum = 0;
 #pragma unroll topk_unroll
-        for (int_t k = max_k - 1; k >= 0; --k)
-            if (k < cfg.top_k)
-                D_topk_sum += topk_val[k] * D_topk[k];
+    for (int_t k = max_k - 1; k >= 0; --k)
+        if (k < cfg.top_k) {
+            D_topk[k] *= topk_val[k];
+            D_topk_sum += D_topk[k];
+            topk_sum += topk_val[k];
+        }
 
+    if (cfg.top_k_re_norm != 0 && topk_sum > 0) {
 #pragma unroll topk_unroll
         for (int_t k = 0; k < max_k; ++k)
             if (k < cfg.top_k)
-                D_topk[k] = topk_val[k] * (D_topk[k] - D_topk_sum);
-    }
-    else {
-        /* backward the exp if not re-norm */
-#pragma unroll topk_unroll
-        for (int_t k = 0; k < max_k; ++k)
-            if (k < cfg.top_k)
-                D_topk[k] = topk_val[k] * D_topk[k];
+                D_topk[k] -= cfg.top_k_re_norm * (topk_val[k] / topk_sum) * D_topk_sum;
     }
 
     /* load slot index and remove CAPE */
@@ -203,31 +197,25 @@ __global__ void topk_addr_backward_kernel(
             if (k < cfg.top_k)
                 D_addr[(addr_idx[k] / stride) % cfg.P] += D_topk[k]; // accumulate in register-array first
 
-        /* if not re-norm, re-distribute gradient inside the sub-vector (backward log-softmax) */
-        if (!cfg.top_k_re_norm) {
-            // rebuild the sorted sub-vector (bounded by memory, rebuild save up one write out)
-            IdxValList<acc_t, max_p> addr;
-            addr.init();
+        /*  rebuild the sorted sub-vector (bounded by memory, rebuild save up one write out). */
+        IdxValList<acc_t, max_p> addr;
+        addr.init();
 
 #pragma unroll
-            for (int_t p = 0; p < max_p; ++p)
-                if (p < cfg.P)
-                    addr.set(p, p, type_cast<scalar_t, acc_t>(local_D_addr_ptr[(u * cfg.P + p) * cfg.T + t_idx]));
+        for (int_t p = 0; p < max_p; ++p)
+            if (p < cfg.P)
+                addr.set(p, p, type_cast<scalar_t, acc_t>(local_D_addr_ptr[(u * cfg.P + p) * cfg.T + t_idx]));
 
-            addr.odd_even_sort();
-            addr.topk_log_softmax(cfg.P);
+        addr.odd_even_sort();
+        addr.topk_log_softmax(cfg.P);
 
-            acc_t D_sum = 0; // sum of gradient for backward log-softmax
-
-#pragma unroll
-            for (int_t p = 0; p < max_p; ++p)
-                D_sum += D_addr[p];
+        /* Differentiate the per-digit softmax. */
+        const acc_t D_sum = (1 - cfg.top_k_re_norm) * D_topk_sum;
 
 #pragma unroll
-            for (int_t k = 0; k < max_p; ++k)
-                if (addr.get_idx(k) >= 0) // in case of the padding
-                    D_addr[addr.get_idx(k)] -= get_exp<acc_t>(addr.get_val(k)) * D_sum;
-        }
+        for (int_t k = 0; k < max_p; ++k)
+            if (addr.get_idx(k) >= 0) // in case of the padding
+                D_addr[addr.get_idx(k)] -= get_exp<acc_t>(addr.get_val(k)) * D_sum;
 
         /* save the result to gmem */
 #pragma unroll
@@ -328,7 +316,7 @@ inline void topk_addr_forward_size_dispatcher(
 
         decltype(&topk_addr_forward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>) func;
     } kernels[] = {
-        // {[](const int_t k, const int_t p) -> bool { return k <= 4 && p <= 4; }, topk_addr_forward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>},
+        {[](const int_t k, const int_t p) -> bool { return k <= 4 && p <= 4; }, topk_addr_forward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>},
         {[](const int_t k, const int_t p) -> bool { return k <= 8 && p <= 4; }, topk_addr_forward_launcher<scalar_dtype, acc_dtype, 8, 4, 8>},
         {[](const int_t k, const int_t p) -> bool { return k <= 16 && p <= 4; }, topk_addr_forward_launcher<scalar_dtype, acc_dtype, 16, 4, 2>},
         {[](const int_t k, const int_t p) -> bool { return k <= 32 && p <= 4; }, topk_addr_forward_launcher<scalar_dtype, acc_dtype, 32, 4, 2>},
@@ -405,7 +393,7 @@ inline void topk_addr_backward_size_dispatcher(
 
         decltype(&topk_addr_backward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>) func;
     } kernels[] = {
-        // {[](const int_t k, const int_t p) -> bool { return k <= 4 && p <= 4; }, topk_addr_backward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>},
+        {[](const int_t k, const int_t p) -> bool { return k <= 4 && p <= 4; }, topk_addr_backward_launcher<scalar_dtype, acc_dtype, 4, 4, 8>},
         {[](const int_t k, const int_t p) -> bool { return k <= 8 && p <= 4; }, topk_addr_backward_launcher<scalar_dtype, acc_dtype, 8, 4, 8>},
         {[](const int_t k, const int_t p) -> bool { return k <= 16 && p <= 4; }, topk_addr_backward_launcher<scalar_dtype, acc_dtype, 16, 4, 2>},
         {[](const int_t k, const int_t p) -> bool { return k <= 32 && p <= 4; }, topk_addr_backward_launcher<scalar_dtype, acc_dtype, 32, 4, 2>},

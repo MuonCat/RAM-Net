@@ -5,7 +5,7 @@ struct AutoregressiveConfig {
     int_t B, H, U, P, A, C, E;
 
     int_t w_top_k, r_top_k;
-    bool w_top_k_re_norm, r_top_k_re_norm;
+    float w_top_k_re_norm, r_top_k_re_norm;
 
     bool mass_aware;
     float eps;
@@ -23,8 +23,8 @@ struct AutoregressiveConfig {
         const int_t w_top_k_,
         const int_t r_top_k_,
 
-        const bool w_top_k_re_norm_,
-        const bool r_top_k_re_norm_,
+        const float w_top_k_re_norm_,
+        const float r_top_k_re_norm_,
 
         const bool mass_aware_,
         const float eps_

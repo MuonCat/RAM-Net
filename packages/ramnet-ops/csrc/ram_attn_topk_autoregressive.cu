@@ -87,7 +87,7 @@ __global__ void ram_attn_topk_autoregressive_kernel(
     // load the value local
     const int_t u_idx = lane_idx % (warp_size / 2);
     const acc_t *const addr_cache = lane_idx < warp_size / 2 ? warp_w_cache : warp_r_cache;
-    const bool addr_re_norm = lane_idx < warp_size / 2 ? cfg.w_top_k_re_norm : cfg.r_top_k_re_norm;
+    const acc_t addr_re_norm = lane_idx < warp_size / 2 ? cfg.w_top_k_re_norm : cfg.r_top_k_re_norm;
 
 
     __shared__ IdxValList<acc_t, max_k, warp_per_block * warp_size> local_topk;
@@ -105,8 +105,7 @@ __global__ void ram_attn_topk_autoregressive_kernel(
         local_input.odd_even_sort();
 
         // calculate log-softmax
-        if (!addr_re_norm)
-            local_input.topk_log_softmax(cfg.P);
+        local_input.topk_log_softmax(cfg.P);
 
         // copy top-k from inputs
         local_topk.copy_from(local_input, thread_idx);
@@ -129,8 +128,8 @@ __global__ void ram_attn_topk_autoregressive_kernel(
     }
 
     // calculate log-softmax
-    if (addr_re_norm)
-        local_topk.topk_log_softmax(lane_idx < warp_size / 2 ? cfg.w_top_k : cfg.r_top_k, thread_idx);
+    if (addr_re_norm != 0)
+        local_topk.topk_log_softmax(lane_idx < warp_size / 2 ? cfg.w_top_k : cfg.r_top_k, thread_idx, addr_re_norm);
 
     // write
     const int_t a_offset = h_idx < cfg.E ? position_ids[b_idx] % cfg.A : 0;

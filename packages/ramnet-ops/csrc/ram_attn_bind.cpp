@@ -29,17 +29,17 @@ RAMNET_LIBRARY(ramnet_ops, m) {
         "Tensor addr, "
         "int embed_num, int A, "
         "Tensor position_ids, "
-        "int top_k, bool top_k_re_norm, "
+        "int top_k, float top_k_re_norm, "
         "bool addr_val_neg=False, "
         "bool encode_batch_idx=True"
         ") -> (Tensor, Tensor)");
     m.def(
         "topk_addr_single_backward("
         "Tensor idx, Tensor val, "
-        "Tensor? addr, "
+        "Tensor addr, "
         "Tensor D_val, "
         "int embed_num, Tensor position_ids, "
-        "int top_k, bool top_k_re_norm, "
+        "int top_k, float top_k_re_norm, "
         "bool addr_val_neg, "
         "int[] shape, ScalarType dtype"
         ") -> Tensor");
@@ -49,17 +49,17 @@ RAMNET_LIBRARY(ramnet_ops, m) {
         "int embed_num, int A, "
         "Tensor position_ids, "
         "int w_top_k, int r_top_k, "
-        "bool w_re_norm, bool r_re_norm, "
+        "float w_re_norm, float r_re_norm, "
         "bool encode_batch_idx=True"
         ") -> (Tensor, Tensor)");
     m.def(
         "topk_addr_backward("
         "Tensor idx, Tensor val, "
-        "Tensor? w_addr, Tensor? r_addr, "
+        "Tensor w_addr, Tensor r_addr, "
         "Tensor D_val, "
         "int embed_num, Tensor position_ids, "
         "int w_top_k, int r_top_k, "
-        "bool w_re_norm, bool r_re_norm, "
+        "float w_re_norm, float r_re_norm, "
         "int[] shape, ScalarType dtype"
         ") -> (Tensor, Tensor)");
     m.def(
@@ -96,7 +96,7 @@ RAMNET_LIBRARY(ramnet_ops, m) {
         "Tensor! slot, Tensor! mass, "
         "Tensor mask, int embed_num, Tensor position_ids, "
         "int w_top_k, int r_top_k, "
-        "bool w_re_norm, bool r_re_norm, "
+        "float w_re_norm, float r_re_norm, "
         "bool mass_aware, float eps"
         ") -> Tensor");
 }

@@ -12,7 +12,7 @@ RamResult = tuple[RamFwd, RamBwd | None]
 
 TOP_K = (8, 8)
 TOP_K_SETTINGS = ((4, 4), (8, 8), (4, 12), (16, 16), (32, 32), (64, 64), (128, 128))
-TOP_K_RE_NORM_SETTINGS = ((False, False), (True, True), (False, True), (True, False))
+TOP_K_RE_NORM_SETTINGS = ((0.0, 0.0), (1.0, 1.0), (0.25, 0.75), (0.75, 0.25))
 EMBED_NUM = 4
 EPS = 1e-12
 
@@ -116,7 +116,7 @@ def gather_ram_result(
         case: RamCase,
         *,
         top_k: tuple[int, int] = TOP_K,
-        top_k_re_norm: tuple[bool, bool] = (False, False),
+        top_k_re_norm: tuple[float, float] = (0.0, 0.0),
         chunk_size: int | None = None,
         grad: bool = True,
         mass_aware: bool = False,

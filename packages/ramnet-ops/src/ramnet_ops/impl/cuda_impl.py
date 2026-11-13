@@ -25,8 +25,8 @@ def _cuda_topk_autoregressive_(
         w_top_k: int,
         r_top_k: int,
 
-        w_re_norm: bool,
-        r_re_norm: bool,
+        w_re_norm: float,
+        r_re_norm: float,
 
         mass_aware: bool,
         eps: float,
@@ -156,7 +156,7 @@ def _cuda_ram_attn(
         position_ids: torch.Tensor,  # (B, T)
 
         top_k: tuple[int, int] | None,
-        top_k_re_norm: tuple[bool, bool],
+        top_k_re_norm: tuple[float, float],
 
         mass_aware: bool,
         eps: float,
@@ -175,12 +175,12 @@ def _cuda_ram_attn(
     if top_k is None:
         raise ValueError("CUDA RAM attention only supports Top-K mode. Use top_k or impl_backend='torch' for dense mode.")
     assert isinstance(top_k, tuple) and len(top_k) == 2 and all(isinstance(k, int) and k > 0 for k in top_k), f"Expected top_k=(positive write_k, positive read_k), got {top_k!r}."
-    assert isinstance(top_k_re_norm, tuple) and len(top_k_re_norm) == 2 and all(isinstance(v, bool) for v in top_k_re_norm), f"Expected top_k_re_norm=(write_bool, read_bool), got {top_k_re_norm!r}."
+    assert isinstance(top_k_re_norm, tuple) and len(top_k_re_norm) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in top_k_re_norm), f"Expected top_k_re_norm=(w, r) in [0, 1], got {top_k_re_norm!r}."
 
     (B, H, T, C), (_, _, U, P, _) = xs.shape, w_addr.shape
     A = P ** U
     w_top_k, r_top_k = top_k
-    w_top_k_re_norm, r_top_k_re_norm = top_k_re_norm
+    w_top_k_re_norm, r_top_k_re_norm = (float(v) for v in top_k_re_norm)
 
     assert all(k <= A for k in top_k), f"Expected top_k <= A={A}, got {top_k}."
     assert isinstance(embed_num, int) and 0 <= embed_num <= H, f"Expected embed_num in [0, {H}], got {embed_num!r}."
@@ -283,7 +283,7 @@ def _cuda_topk_addr(
         position_ids: torch.Tensor,  # (B, T)
 
         top_k: int,
-        top_k_re_norm: bool,
+        top_k_re_norm: float,
 
         addr_val_neg: bool = False,
         encode_batch_idx: bool = True,
@@ -302,7 +302,8 @@ def _cuda_topk_addr(
     assert A < ADDRESS_LIMIT, f"Address space overflow: A={A}, limit={ADDRESS_LIMIT}."
     assert isinstance(top_k, int) and 0 < top_k <= A, f"Expected top_k in [1, A={A}], got {top_k!r}."
     assert isinstance(embed_num, int) and 0 <= embed_num <= H, f"Expected embed_num in [0, {H}], got {embed_num!r}."
-    assert isinstance(top_k_re_norm, bool), f"Expected boolean top_k_re_norm, got {top_k_re_norm!r}."
+    assert isinstance(top_k_re_norm, (int, float)) and 0 <= top_k_re_norm <= 1, f"Expected top_k_re_norm in [0, 1], got {top_k_re_norm!r}."
+    top_k_re_norm = float(top_k_re_norm)
     assert isinstance(addr_val_neg, bool), f"Expected boolean addr_val_neg, got {addr_val_neg!r}."
     assert isinstance(encode_batch_idx, bool), f"Expected boolean encode_batch_idx, got {encode_batch_idx!r}."
     assert position_ids.shape == (B, T), f"Expected position_ids.shape={(B, T)}, got {tuple(position_ids.shape)}."
