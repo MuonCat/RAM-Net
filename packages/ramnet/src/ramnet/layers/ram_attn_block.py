@@ -61,7 +61,7 @@ class RAMNetAttention(torch.nn.Module):
             addr_radix: int = 4,
             value_chs: int | None = None,
             # === Forgetting Modulation ===
-            gamma: float = 2.197,
+            gamma: float = 0.0,
             gamma_mode: Literal['fixed', 'learnable', 'dynamic'] = 'dynamic',
             # === RAM initial mass ===
             init_mass: float | None = None,
@@ -74,7 +74,7 @@ class RAMNetAttention(torch.nn.Module):
             # === Readout ===
             mass_aware: bool = False,
             output_gate: OutputGateType | None = 'sigmoid',
-            output_norm: bool = False,
+            output_norm: bool = True,
             # === Projection ===
             addr_proj_bias: bool = True,
             value_proj_bias: bool = False,

@@ -62,8 +62,9 @@ if os.getenv("SKIP_CUDA", "0") != "1":
         cxx_args = ['/O2', *msvc_defines]
         nvcc_args = ['-O3', '-lineinfo', '--use_fast_math', *(arg for flag in msvc_args for arg in ('-Xcompiler', flag)), ]
     else:
-        cxx_args = ['-O3']
-        nvcc_args = ['-O3', '-lineinfo', '--use_fast_math']
+        # Internal types containing Stable Tensor must share its hidden visibility.
+        cxx_args = ['-O3', '-fvisibility=hidden']
+        nvcc_args = ['-O3', '-lineinfo', '--use_fast_math', '-Xcompiler', '-fvisibility=hidden']
     extension = CUDAExtension(
         name='ramnet_ops._C',
         sources=[source.as_posix() for source in sources],

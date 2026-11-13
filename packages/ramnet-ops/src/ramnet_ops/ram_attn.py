@@ -108,7 +108,7 @@ def random_access_memory_attention(
         r_addr: torch.Tensor,
 
         values: torch.Tensor,
-        gamma: torch.Tensor | float = 2.197,
+        gamma: torch.Tensor | float = 0.0,
 
         init_ram: tuple[torch.Tensor | None, torch.Tensor | float | None] | None = None,
 

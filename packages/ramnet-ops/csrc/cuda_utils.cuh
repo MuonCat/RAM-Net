@@ -261,7 +261,8 @@ struct IdxValList {
         for (int_t i = 0; i < M; ++i)
             frontier[i] = 0;
 
-#pragma unroll
+        // Bound code growth for large Top-K merges while retaining full unrolling for small lists.
+#pragma unroll (N <= 32 ? N : 8)
         for (int_t k = 0; k < N; ++k) {
             acc_t best_val = -std::numeric_limits<acc_t>::infinity();
             int_t best_r = -1, best_idx = -1;

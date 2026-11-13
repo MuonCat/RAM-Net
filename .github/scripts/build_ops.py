@@ -44,7 +44,7 @@ def main():
     log(f"Python {sys.version.split()[0]} on {sys.platform}: {sys.executable}")
     log(f"Source: {root}; build directory: {work}")
     for name in ("TORCH_VERSION", "CUDA_VERSION", "CUDA_HOME", "TORCH_CUDA_ARCH_LIST",
-                 "RAMNET_TORCH_STABLE_ABI", "MAX_JOBS", "CC", "CXX", "CUDAHOSTCXX", "MSVC_VERSION"):
+                 "RAMNET_TORCH_STABLE_ABI", "MAX_JOBS", "NVCC_PREPEND_FLAGS", "CC", "CXX", "CUDAHOSTCXX", "MSVC_VERSION"):
         if name in os.environ:
             log(f"{name}={os.environ[name]}")
 

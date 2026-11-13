@@ -18,7 +18,9 @@ defaults:
 
 env:
   PIP_NO_CACHE_DIR: '1'
-  MAX_JOBS: '2'
+  # Parallelize architectures within one source to bound peak compiler memory.
+  MAX_JOBS: '1'
+  NVCC_PREPEND_FLAGS: '--threads 4'
 
 jobs:
   metadata:
