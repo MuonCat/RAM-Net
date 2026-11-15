@@ -239,4 +239,8 @@ See [RAMNetConfig](src/ramnet/models/config_ramnet.py) for the full parameter li
 
 See [RELEASING](RELEASING.md) for tests and publishing.
 
+## Acknowledgements
+
+We thank [Flash Linear Attention](https://github.com/fla-org/flash-linear-attention) for modules such as RMSNorm, GatedMLP, and fused losses, and for the layer and cache conventions followed by this package.
+
 MIT License. See [LICENSE](LICENSE).

@@ -16,7 +16,7 @@ The Chinese University of Hong Kong
 
 </div>
 
-## Overview
+## 🔎 Overview
 
 Full attention stores every past token in a KV cache, which grows with sequence length.
 In contrast, linear attention keeps a fixed-size state, superposing information from all tokens in one shared matrix that is accessed in full at every step.
@@ -39,7 +39,7 @@ Because each step accesses only a few slots, RAM-Net has two properties:
 - **Confined interference.** Tokens written to different slots are stored separately, so interference arises only in the slots they share.
 - **Decoupled state size.** Each step accesses `K` slots regardless of how many slots exist, so the state can grow without increasing the per-step cost.
 
-## Architecture
+## 🏗️ Architecture
 
 <p align="center">
   <img src="assets/architecture.png" alt="RAM-Net block, RAM-Net layer, Address Decoder, and CAPE" width="100%">
@@ -91,7 +91,7 @@ RAM-Net finds the most probable slots through Top-K prefix decoding.
 At each digit, it extends only the retained address prefixes with the $d_p$ possible next values, then keeps up to `K` highest-probability prefixes for the next step.
 After $U$ steps, this yields the exact Top-K slot addresses without fully expanding the address space or materializing all $d_p^U$ probabilities.
 
-## Packages
+## 📦 Packages
 
 | Package                                     | Import       | Description                                                           |
 |---------------------------------------------|--------------|-----------------------------------------------------------------------|
@@ -107,7 +107,7 @@ After $U$ steps, this yields the exact Top-K slot addresses without fully expand
 `-- examples/         # Standalone operator and Hugging Face model examples
 ```
 
-## Installation
+## 🔧 Installation
 
 Requires:
 
@@ -165,7 +165,7 @@ python -m pip install ramnet
 
 See the [ramnet README](packages/ramnet/README.md#installation) for source installation and usage examples.
 
-## Quick start
+## 🚀 Quick start
 
 The table maps paper notation to parameters and the operator example below.
 
@@ -285,7 +285,7 @@ print(tokenizer.decode(tokens[0], skip_special_tokens=True))
 
 Run [model_generate.py](examples/model_generate.py) with `python examples/model_generate.py`.
 
-## Results
+## 📊 Results
 
 Zero-shot results from [the paper, Tables 1–3](https://arxiv.org/html/2602.11958v2#S5).
 All models are trained on FineWeb-Edu with a 4K context, using 10B tokens at 340M scale and 100B tokens at 1.3B scale.
@@ -319,11 +319,20 @@ RAM-Net achieves the highest S-NIAH average and the lowest perplexity at both sc
 Moreover, increasing `K` consistently improves perplexity and retrieval, at the cost of more state access per step.
 In decoding throughput, RAM-Net with `K` = 8 matches GLA and exceeds Mamba2 and Gated DeltaNet (Figure 5 of the paper).
 
-## Development
+## 🛠️ Development
 
 See the [test guide](tests/README.md) for local tests and the release guides for [ramnet](packages/ramnet/RELEASING.md) and [ramnet-ops](packages/ramnet-ops/RELEASING.md) for independent builds and publishing.
 
-## Citation
+## 🙏 Acknowledgements
+
+We thank the teams behind the following open-source projects:
+
+- [Flash Linear Attention](https://github.com/fla-org/flash-linear-attention) for baseline implementations.
+- [FLAME](https://github.com/fla-org/flame) for a unified training framework.
+- [harness-evals](https://github.com/harness/harness-evals) for evaluation tools.
+- [RULER](https://github.com/NVIDIA/RULER) for evaluation benchmarks.
+
+## 📚 Citation
 
 ```bibtex
 @article{xiao2026ram,
